@@ -1,0 +1,3 @@
+[submodule "ldparser"]
+	path = ldparser
+	url = git@github.com:gotzl/ldparser.git
