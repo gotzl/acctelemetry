@@ -80,9 +80,9 @@ def createSource(files):
     for f in files:
         if not os.path.isfile(f[:-2]+"ldx"): continue
         head = ldparser.ldhead(f)
-        laps = laps(f)
-        for i, lap in enumerate(laps):
-            if i>0: lap -= laps[i-1]
+        laps_ = laps(f)
+        for i, lap in enumerate(laps_):
+            if i>0: lap -= laps_[i-1]
             data.append((os.path.basename(f),
                          head.datetime.strftime("%Y-%m-%d %H:%M:%S"),
                          head.descr1, head.descr2, i,
