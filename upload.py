@@ -7,18 +7,18 @@ Created on Wed May 03 11:26:21 2017
 """
 
 
-def uploadButton(base, source):
+def uploadButton(source, filter_source, track_select, car_select):
     from bokeh.models import ColumnDataSource, CustomJS
     from bokeh.models.widgets import Button
-    from acctelemetry import scanFiles
+    from acctelemetry import updateTableData
 
-    import os, base64, glob
+    import os, base64
 
     file_source = ColumnDataSource({'file_contents':[], 'file_name':[]})
 
     def file_callback(attr,old,new):
         print('filename:', file_source.data['file_name'])
-        f = os.path.join(base, file_source.data['file_name'][0])
+        f = os.path.join(os.environ['TELEMETRY_FOLDER'], file_source.data['file_name'][0])
         if os.path.splitext(f)[1] not in ['.ld', '.ldx'] or os.path.exists(f):
             button.disabled = False
             return
@@ -30,8 +30,7 @@ def uploadButton(base, source):
         with open(f, 'wb') as f_:
             f_.write(file_contents)
 
-        files = glob.glob(base+'/*.ld')
-        source.data = scanFiles(files)
+        updateTableData(source, filter_source, track_select, car_select)
 
         button.disabled = False
 

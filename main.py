@@ -16,11 +16,11 @@ def callback():
     button.disabled = True
     s = []
     df = None
-    idxs = source.selected.indices
+    idxs = filter_source.selected.indices
     # idxs = source.selected['1d']['indices']
 
     for idx in idxs:
-        f_ = base_+'/%s'%source.data['name'][idx]
+        f_ = os.environ['TELEMETRY_FOLDER']+'/%s'%filter_source.data['name'][idx]
         head_, chans = ldparser.read_ldfile(f_)
 
         laps = acctelemetry.laps(f_)
@@ -30,7 +30,7 @@ def callback():
         # create pandas DataFrame
         df_ = acctelemetry.createDataFrame(chans, laps_limits)
         # restrict to selected lap
-        lap = int(source.data['lap'][idx])
+        lap = int(filter_source.data['lap'][idx])
         df_ = df_[df_.lap==lap]
 
         # create a datasource and bind data
@@ -39,7 +39,7 @@ def callback():
                    ColumnDataSource(df_)))
 
         if df is None: df = df_
-        else: df.append(df_)
+        else: df = df.append(df_)
 
     if df is None:
         button.disabled = False
@@ -54,12 +54,6 @@ def callback():
     button.disabled = False
 
 
-base_ = os.environ['TELEMETRY_FOLDER']
-files = glob.glob(base_+'/*.ld')
-data = acctelemetry.scanFiles(files)
-
-source= ColumnDataSource(data=data)
-original_source = ColumnDataSource(data=data)
 
 columns = [
     TableColumn(field="name", title="File name"),
@@ -70,13 +64,15 @@ columns = [
     TableColumn(field="time", title="Lap time"),
 ]
 
-data_table = DataTable(source=source, columns=columns, width=800)
+source = ColumnDataSource()
+filter_source = ColumnDataSource()
+data_table = DataTable(source=filter_source, columns=columns, width=800)
 
 ### https://gist.github.com/dennisobrien/450d7da20daaba6d39d0
 # callback code to be used by all the filter widgets
 combined_callback_code = """
-var data = source.data;
-var original_data = original_source.data;
+var data = filter_source.data;
+var original_data = source.data;
 var track = track_select_obj.value;
 var car = car_select_obj.value;
 for (var key in original_data) {
@@ -89,20 +85,18 @@ for (var key in original_data) {
     }
 }
 
-source.change.emit();
+filter_source.change.emit();
 target_obj.change.emit();
 """
 
 # define the filter widgets, without callbacks for now
-track_list = ['ALL'] + np.unique(original_source.data['track']).tolist()
-track_select = Select(title="Track:", value=track_list[0], options=track_list)
-car_list = ['ALL'] + np.unique(original_source.data['car']).tolist()
-car_select = Select(title="Car:", value=track_list[0], options=car_list)
+track_select = Select(title="Track:", value='ALL', options=['ALL'])
+car_select = Select(title="Car:", value='ALL', options=['ALL'])
 
 # now define the callback objects now that the filter widgets exist
 generic_callback = CustomJS(
     args=dict(source=source,
-              original_source=original_source,
+              filter_source=filter_source,
               track_select_obj=track_select,
               car_select_obj=car_select,
               target_obj=data_table),
@@ -116,12 +110,16 @@ filters = row(track_select, car_select)
 ######
 
 
+acctelemetry.updateTableData(
+    source, filter_source, track_select, car_select)
+
 button = Button(label="Load", button_type="success")
 button.on_click(callback)
 
 tabs,figs = [],[]
 tabs.append(Panel(
-    child=column(filters, data_table, button, uploadButton(base_, source)),
+    child=column(filters, data_table, button, uploadButton(
+        source, filter_source, track_select, car_select)),
     title="Laps"))
 
 for ttl in ["LapData", "RPMs", "Wheelspeed", "Over/Understeer", "Susp Trvl"]:

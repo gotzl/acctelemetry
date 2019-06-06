@@ -1,4 +1,4 @@
-import os
+import os, glob
 import numpy as np
 import pandas as pd
 
@@ -102,4 +102,18 @@ def scanFiles(files):
     )
 
 
+def updateTableData(source, filter_source, track_select, car_select):
+    data = scanFiles(glob.glob(os.environ['TELEMETRY_FOLDER']+'/*.ld'))
 
+    source.data = data
+    filter_source.data = data
+
+    getOptions = lambda key: \
+        (['ALL'] + np.unique(source.data[key]).tolist()) \
+            if key in source.data else ['ALL']
+
+    track_select.options=getOptions('track')
+    track_select.value = 'ALL'
+
+    car_select.options=getOptions('car')
+    car_select.value = 'ALL'
