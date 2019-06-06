@@ -59,19 +59,31 @@ def createDataFrame(channs, laps_limits):
 
     # calculate oversteer, based on math in ACC MoTec workspace
     wheelbase = 2.645
-    a= np.sign(df.g_lat) * (wheelbase * df.g_lat / (df.speed*df.speed))
-    b= np.sign( ((df.steerangle/11) * (np.pi/180) * df.g_lat).mean() ) * ((df.steerangle/11) * (np.pi/180))
-    oversteer = (a-b)*(180/np.pi)
+    neutral_steering= (wheelbase * df.g_lat.rolling(10).mean() / (df.speed.pow(2)))*1e3
+    steering_corr= ((df.steerangle/11))
+
+    oversteer  = np.sign(df.g_lat) * (neutral_steering-steering_corr)
+    understeer = oversteer.copy()
+
+    indices = oversteer < 0
+    oversteer[indices] = 0
+
+    indices = understeer > 0
+    understeer[indices] = 0
 
 
     # add the lists to the dataframe
-    return pd.concat([df, pd.DataFrame(
+    df = pd.concat([df, pd.DataFrame(
         {'lap':l,
          'g_sum': df.g_lon.abs()+df.g_lat.abs(),
          'speedkmh':df.speed*3.6,
-         'oversteer':oversteer,
+         'neutral_steering':neutral_steering,
+         'steering_corr':steering_corr,
+         'oversteer':oversteer,#*180/np.pi,
+         'understeer':understeer,#*180/np.pi,
          'dist':s,'dist_lap':sl,
          'time':t,'time_lap':tl})], axis=1)
+    return df
 
 
 def scanFiles(files):

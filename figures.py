@@ -183,13 +183,13 @@ def getRPMFigure(df):
     return column(p1,p2)
 
 
-def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None):
+def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None, x_range=None):
     WIDTH = 800
     TOOLS = "crosshair,pan,reset,save,wheel_zoom"
 
     # create a new plot with a title and axis labels
     p = figure(plot_height=400, plot_width=WIDTH, tools=TOOLS,
-               x_axis_label='Dist [m]')
+               x_range=x_range, x_axis_label='Dist [m]')
 
     y_range_name = lambda x: None
     if extra_y:
@@ -251,9 +251,18 @@ def getWheelSpeedFigure(df):
 
 
 def getOversteerFigure(df):
-    vars = ['speedkmh','steerangle','g_lat', 'oversteer']
+    vars = ['speedkmh','oversteer','understeer']#,'steering_corr','neutral_steering']
     tools = ['time','dist']+vars
-    return getSimpleFigure(df, vars+['tc', 'throttle','brake'], tools,
-                           {"pedals": Range1d(start=-20, end=400), "tc": Range1d(start=-1, end=20), "oversteer": Range1d(start=-15, end=25)},
-                           {"pedals":['throttle','brake'], "tc":['tc'], "oversteer":['oversteer','g_lat']})
+    p0 =  getSimpleFigure(df, vars+['tc', 'throttle','brake'], tools,
+                           {"pedals": Range1d(start=-10, end=500), "tc": Range1d(start=-1, end=50), "oversteer": Range1d(start=-15, end=25)},
+                           {"pedals":['throttle','brake'], "tc":['tc','g_lat'], "oversteer":['steering_corr','neutral_steering','oversteer','understeer']})
 
+    vars = ['g_lat', 'g_lon', 'g_sum','steering_corr','neutral_steering', 'oversteer', 'understeer']
+    tools = ['time','dist']+vars
+    p1 =  getSimpleFigure(df, vars, tools,
+                          {"oversteer": Range1d(start=-15, end=35)},
+                          {"oversteer":['steering_corr','neutral_steering',
+                                        'oversteer','understeer']},
+                          x_range = p0.x_range)
+
+    return gridplot([p0,p1], ncols=1)
