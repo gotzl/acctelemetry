@@ -95,7 +95,7 @@ def scanFiles(files):
     return dict(
         name=data[:,0],
         datetime=data[:,1],
-        location=data[:,2],
+        track=data[:,2],
         car=data[:,3],
         lap=data[:,4],
         time=data[:,5],

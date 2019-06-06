@@ -1,6 +1,6 @@
+# https://github.com/bokeh/bokeh/issues/6096#issuecomment-299002827
 # -*- coding: utf-8 -*-
 """
-https://github.com/bokeh/bokeh/issues/6096#issuecomment-299002827
 Created on Wed May 03 11:26:21 2017
 
 @author: Kevin Anderson
@@ -18,25 +18,29 @@ def uploadButton(base, source):
 
     def file_callback(attr,old,new):
         print('filename:', file_source.data['file_name'])
+        f = os.path.join(base, file_source.data['file_name'][0])
+        if os.path.splitext(f)[1] not in ['.ld', '.ldx'] or os.path.exists(f):
+            button.disabled = False
+            return
+
         raw_contents = file_source.data['file_contents'][0]
         # remove the prefix that JS adds
         prefix, b64_contents = raw_contents.split(",", 1)
         file_contents = base64.b64decode(b64_contents)
-        f = os.path.join(base, file_source.data['file_name'][0])
-        if (os.path.splitext(f)[1] == '.ld' or
-                os.path.splitext(f)[1] == '.ldx') and\
-                not os.path.exists(f):
+        with open(f, 'wb') as f_:
+            f_.write(file_contents)
 
-            with open(f, 'wb') as f_:
-                f_.write(file_contents)
+        files = glob.glob(base+'/*.ld')
+        source.data = scanFiles(files)
 
-            files = glob.glob(base+'/*.ld')
-            source.data = scanFiles(files)
+        button.disabled = False
+
 
     file_source.on_change('data', file_callback)
 
     button = Button(label="Upload", button_type="success")
-    button.callback = CustomJS(args=dict(file_source=file_source), code = """
+    button.callback = CustomJS(
+        args=dict(file_source=file_source, button=button), code="""
     function read_file(filename) {
         var reader = new FileReader();
         reader.onload = load_handler;
@@ -61,6 +65,7 @@ def uploadButton(base, source):
     input.setAttribute('type', 'file');
     input.onchange = function(){
         if (window.FileReader) {
+            button.disabled = true;
             read_file(input.files[0]);
         } else {
             alert('FileReader is not supported in this browser');

@@ -5,6 +5,7 @@ else
     PREFIX_PARAM="--prefix ${PREFIX}";
 fi
 /root/.local/bin/bokeh serve --show acctelemetry\
+    --websocket-max-message-size 52428800\
     --port ${PORT}\
     --address 0.0.0.0\
     --allow-websocket-origin=${ORIGIN}\
