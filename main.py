@@ -1,4 +1,5 @@
 import os, glob
+import numpy as np
 
 from bokeh.models.widgets import DataTable, TableColumn, Button
 from bokeh.models import Panel, Tabs, ColumnDataSource
@@ -10,15 +11,14 @@ from ldparser import ldparser
 import acctelemetry
 import figures
 
-base_ = os.environ['TELEMETRY_FOLDER']
-files = glob.glob(base_+'/*.ld')
-source = acctelemetry.createSource(files)
-
 
 def callback():
     s = []
     df = None
-    for idx in source.selected['1d']['indices']:
+    idxs = source.selected.indices
+    # idxs = source.selected['1d']['indices']
+
+    for idx in idxs:
         f_ = base_+'/%s'%source.data['name'][idx]
         head_, chans = ldparser.read_ldfile(f_)
 
@@ -50,6 +50,11 @@ def callback():
     figs[4].children[0] = figures.getSuspFigure(df)
 
 
+base_ = os.environ['TELEMETRY_FOLDER']
+files = glob.glob(base_+'/*.ld')
+data = acctelemetry.scanFiles(files)
+source= ColumnDataSource(data=data)
+
 columns = [
     TableColumn(field="name", title="File name"),
     TableColumn(field="datetime", title="Datetime"),
@@ -59,15 +64,14 @@ columns = [
     TableColumn(field="time", title="Lap time"),
 ]
 
-
 data_table = DataTable(source=source, columns=columns, width=800)
 button = Button(label="Load", button_type="success")
 button.on_click(callback)
 
 tabs,figs = [],[]
-tabs.append(Panel(child=column(data_table, button, uploadButton(base_, data_table)), title="Laps"))
+tabs.append(Panel(child=column(data_table, button, uploadButton(base_, source)), title="Laps"))
 for ttl in ["LapData", "RPMs", "Wheelspeed", "Over/Understeer", "Susp Trvl"]:
-    figs.append(row(column(figure(plot_height=500, plot_width=800))))
+    figs.append(row(figure(plot_height=500, plot_width=800)))
     tabs.append(Panel(child=figs[-1], title=ttl))
 
 tabs_ = Tabs(tabs=tabs)

@@ -3,14 +3,13 @@ import numpy as np
 import pandas as pd
 
 import xml.etree.ElementTree as ET
-from bokeh.models import ColumnDataSource
 
 from ldparser import ldparser
 
 
 def laps(f):
     laps = []
-    tree = ET.parse(f[:-2]+"ldx")
+    tree = ET.parse(os.path.splitext(f)[0]+".ldx")
     root = tree.getroot()
 
     # read lap times
@@ -75,10 +74,10 @@ def createDataFrame(channs, laps_limits):
          'time':t,'time_lap':tl})], axis=1)
 
 
-def createSource(files):
+def scanFiles(files):
     data = []
     for f in files:
-        if not os.path.isfile(f[:-2]+"ldx"): continue
+        if not os.path.isfile(os.path.splitext(f)[0]+".ldx"): continue
         head = ldparser.ldhead(f)
         laps_ = laps(f)
         for i, lap in enumerate(laps_):
@@ -88,18 +87,19 @@ def createSource(files):
                          head.descr1, head.descr2, i,
                          "%i:%02i.%03i"%(lap//60,lap%60,(lap*1e3)%1000),
                         ))
+
     if len(data)==0:
-        return ColumnDataSource()
+        return dict()
 
     data = np.array(data)
-    return ColumnDataSource(data=dict(
+    return dict(
         name=data[:,0],
         datetime=data[:,1],
         location=data[:,2],
         car=data[:,3],
         lap=data[:,4],
         time=data[:,5],
-    ))
+    )
 
 
 

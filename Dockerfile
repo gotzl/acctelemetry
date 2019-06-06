@@ -9,7 +9,7 @@ RUN pip3 install --user --no-cache-dir -r requirements.txt
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-ENV ORIGIN="localhost:5100" PORT="5100" PREFIX="" LOG_LEVEL="debug"
+ENV ORIGIN="localhost:5100" PORT="5100" PREFIX="" LOG_LEVEL="info"
 
 ADD . /acctelemetry
 

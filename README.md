@@ -17,3 +17,9 @@ pip3 install -r requirements.txt
 export TELEMETRY_FOLDER=='/../Documents/Assetto Corsa Competizione/MoTeC'
 bokeh serve --show ../acctelemetry
 ```
+
+There is also a docker image
+```bash
+docker build -t acctelemetry .
+docker run --name acctelemetry -p 5100:5100 -e ORIGIN=www.example.com:5100 -d --rm acctelemetry
+```

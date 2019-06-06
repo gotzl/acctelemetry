@@ -6,10 +6,11 @@ Created on Wed May 03 11:26:21 2017
 @author: Kevin Anderson
 """
 
-def uploadButton(base, data_table):
+
+def uploadButton(base, source):
     from bokeh.models import ColumnDataSource, CustomJS
     from bokeh.models.widgets import Button
-    from acctelemetry import createSource
+    from acctelemetry import scanFiles
 
     import os, base64, glob
 
@@ -22,14 +23,15 @@ def uploadButton(base, data_table):
         prefix, b64_contents = raw_contents.split(",", 1)
         file_contents = base64.b64decode(b64_contents)
         f = os.path.join(base, file_source.data['file_name'][0])
-        if not os.path.exists(f):
+        if (os.path.splitext(f)[1] == '.ld' or
+                os.path.splitext(f)[1] == '.ldx') and\
+                not os.path.exists(f):
+
             with open(f, 'wb') as f_:
                 f_.write(file_contents)
 
-            global source
             files = glob.glob(base+'/*.ld')
-            source = createSource(files)
-            data_table.source = source
+            source.data = scanFiles(files)
 
     file_source.on_change('data', file_callback)
 
@@ -46,7 +48,7 @@ def uploadButton(base, data_table):
     function load_handler(event) {
         var b64string = event.target.result;
         file_source.data = {'file_contents' : [b64string], 'file_name':[input.files[0].name]};
-        file_source.trigger("change");
+        file_source.change.emit();
     }
     
     function error_handler(evt) {

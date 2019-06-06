@@ -207,22 +207,24 @@ def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None):
             k = [k for k in vars if k[0] in var]
             if len(k)==1:
                 return k[0][1]
-            return None
+            return 'default'
 
         for name in extra_y:
             # Adding the second axis to the plot.
             p.add_layout(LinearAxis(
                 y_range_name=name,
-                axis_label=name), 'left') # TODO: has to be left, bokeh bug?
+                axis_label=name), 'right')
 
 
     colors = itertools.cycle(palette)
     ds = ColumnDataSource(df)
     for i in vars:
-        p.line(x='dist_lap', y=i, source=ds, legend='m = {}'.format(i),
+        p.line(x='dist_lap', y=i, source=ds,
+               legend='m = {}'.format(i),
                line_width=2, line_alpha=0.6,
                line_color=next(colors),
-               y_range_name=y_range_name(i))
+               y_range_name=y_range_name(i)
+               )
 
     p.toolbar_location="above"
     p.add_tools(createHoverTool(tools))
