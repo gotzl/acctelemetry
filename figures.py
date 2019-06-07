@@ -1,10 +1,15 @@
-import itertools
+import os, itertools
+import numpy as np
+import matplotlib.colors as mplcolors
+
 from bokeh.palettes import Spectral4, Dark2_5 as palette
 from bokeh.plotting import figure
-from bokeh.models import CrosshairTool, HoverTool, CustomJS,\
-    LinearAxis, ColumnDataSource, Range1d
-from bokeh.layouts import gridplot, column
+from bokeh.models import CrosshairTool, HoverTool, CustomJS, \
+    LinearAxis, ColumnDataSource, Range1d, TextInput, Circle, Select, Line
+from bokeh.layouts import gridplot, column, row
 
+import acctelemetry, laptable
+from ldparser import ldparser
 
 def createHoverTool(tools, mode='mouse'):
     _tools = dict(
@@ -266,3 +271,178 @@ def getOversteerFigure(df):
                           x_range = p0.x_range)
 
     return gridplot([p0,p1], ncols=1)
+
+
+def getLapDelta():
+    filters, data_table, source, filter_source, track_select, car_select = laptable.create()
+    acctelemetry.updateTableData(
+        source, filter_source, track_select, car_select)
+
+    def callback_(attrname, old, new):
+        callback("absolut")
+
+    def callback(mode):
+        idxs = filter_source.selected.indices
+        if (len(idxs)<2):
+            fig.children[0] = tmp
+            return
+
+        df, track, reference, target = None, None, None, None
+        for idx in idxs:
+            name = filter_source.data['name'][idx]
+            f_ = os.environ['TELEMETRY_FOLDER']+'/%s'%name
+            head_, chans = ldparser.read_ldfile(f_)
+
+            # if track is not None and head_.descr1!=track: continue
+
+            laps = acctelemetry.laps(f_)
+            laps_limits = acctelemetry.laps_limits(laps, chans[4].freq, len(chans[4].data))
+
+            laps = np.array(laps)
+            laps_times = [laps[0]]
+            laps_times.extend(list(laps[1:]-laps[:-1]))
+
+            # create pandas DataFrame
+            df_ = acctelemetry.createDataFrame(
+                name, chans, laps_times, laps_limits)
+            # restrict to selected lap
+            lap = int(filter_source.data['lap'][idx])
+            df_ = df_[df_.lap==lap]
+
+
+            info = [name, lap, head_.descr2, laps_times[lap]]
+            if df is None:
+                df = df_
+                reference = info
+                track = head_.descr1
+            else:
+                df = df.append(df_)
+                target = info
+
+        if reference is None or target is None:
+            fig.children[0] = tmp
+            return
+
+        text_input.value = "%s: reference: %s (%i) | target: %s (%i)"%(track, reference,idxs[0],target,idxs[-1])
+        text_input.value = "%s | %s: reference: %s / %.3f (%i) | target: %s / %.3f (%i)"%\
+                           (track, mode, reference[2], reference[3], idxs[0],
+                            target[2], target[3], idxs[-1])
+
+        fig.children[0] = getLapDeltaFigure(df, reference[:2], target[:2], mode)
+
+    def mode_change(attrname, old, new):
+        # if (old==new) or p1 is None: return
+        callback(new)
+        # c = 'color_absolut'
+        # if new == 'gainloss':
+        #     c = 'color_grad'
+        # global ds
+        # ds.data['color'] = ds.data[c]
+        # ds.trigger('indices', None, None)
+
+    text_input = TextInput(value="nothing selected")
+    text_input.disabled = True
+
+    mode_select = Select(title="Mode:", value='absolut', options=['absolut','gainloss'])
+    mode_select.on_change('value', mode_change)
+
+    filter_source.selected.on_change('indices', callback_)
+    tmp = figure(plot_height=500, plot_width=800)
+    fig = row(tmp)
+    return column(filters,data_table,text_input,mode_select,fig)
+
+
+def getLapDeltaFigure(df, reference, target, mode='absolut'):
+
+    dt_, df_, df_r = acctelemetry.lapdelta(df, reference, target)
+    color = acctelemetry.deltacolors(dt_)
+    color_grad = acctelemetry.deltacolors(dt_, style='grad')
+
+    color = list(map(mplcolors.to_hex, color))
+    color_grad = list(map(mplcolors.to_hex, color_grad))
+
+    # df_ = pd.concat([df_, pd.DataFrame({
+    #     'color_absolut': color,
+    #     'color_grad': color_grad,
+    #     'dt': dt_})
+    # ])
+
+    ds = ColumnDataSource(df_)
+    # ds.data['dt'] = dt_
+    ds.data['color'] = color
+    ds.data['color_absolut'] = color
+    ds.data['color_grad'] = color_grad
+
+    p0 = figure(plot_height=400, plot_width=800,
+                tools="crosshair,pan,reset,save,wheel_zoom")
+
+    lim = max(abs(dt_))
+    lim += lim*.2
+    p0.extra_y_ranges = {"dt": Range1d(start=-lim, end=lim)}
+    p0.add_layout(LinearAxis(
+        y_range_name='dt',
+        axis_label='dt [s]'), 'right')
+
+    colors = itertools.cycle(palette)
+    p0.line(df_.dist_lap, df_.speedkmh, color=next(colors), line_width=2)
+    p0.line(df_.dist_lap, dt_, y_range_name='dt', color=next(colors), line_width=2)
+    p0.line(df_r.dist_lap, df_r.speedkmh, color=next(colors), line_width=2)
+
+    p1 = figure(plot_height=400, plot_width=800,
+                tools="crosshair,pan,reset,save,wheel_zoom")
+    p1.scatter(df_.x, df_.y, color=color_grad if mode=='gainloss' else color)
+    # p1.scatter(x='x', y='y', line_color=None,
+    #            color='color_grad' if mode=='gainloss' else 'color_absolut', source=ds)
+
+    # p0.add_tools(createHoverTool(['time','dist_lap','speedkmh','dt']))
+    # p1.add_tools(createHoverTool(['time','dist_lap','speedkmh','dt']))
+
+    # c1 = p1.circle(x='x', y='y', source=ds, size=10)
+
+    nonsel_circle0 = Circle(x='dist_lap', y='speedkmh',
+                            fill_color=next(colors),
+                            fill_alpha=0.,
+                            line_color=None, size=6
+                          # line_color=next(colors),
+                          # line_width=2,
+                          )
+
+    circle0 = Circle(x='dist_lap', y='speedkmh',
+                    fill_color='red',
+                    fill_alpha=1.0,
+                    line_color=None, size=6
+                   # line_color='red',
+                   # line_width=2,
+                     )
+
+    c0 = p0.add_glyph(ds, nonsel_circle0,
+                      selection_glyph=circle0,
+                      nonselection_glyph=nonsel_circle0)
+
+    invisible_circle = Circle(x='x', y='y',
+                              fill_color='gray',
+                              fill_alpha=0.0,
+                              line_color=None, size=10)
+    circle = Circle(x='x', y='y',
+                    fill_color='red',
+                    fill_alpha=1.0,
+                    line_color=None, size=10)
+
+    c1 = p1.add_glyph(ds, invisible_circle,
+                      selection_glyph=circle,
+                      nonselection_glyph=invisible_circle)
+
+    code = "source.selected = cb_data['index']; source.change.emit();"
+    callback = CustomJS(args={'source': ds}, code=code)
+    hover0 = HoverTool(tooltips=None, callback=callback,
+                      renderers=[c0, c1])
+    hover0.point_policy='snap_to_data'
+    hover0.mode = 'vline'
+
+    hover = HoverTool(tooltips=None, callback=callback,
+                       renderers=[c0, c1])
+    hover.point_policy='snap_to_data'
+
+    p0.add_tools(hover0)
+    p1.add_tools(hover)
+    return column(p0, p1)

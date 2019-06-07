@@ -1,8 +1,8 @@
-import os, glob
+import os
 import numpy as np
 
-from bokeh.models.widgets import DataTable, TableColumn, Button, Select
-from bokeh.models import Panel, Tabs, ColumnDataSource, CustomJS
+from bokeh.models.widgets import Button
+from bokeh.models import Panel, Tabs, ColumnDataSource
 from bokeh.plotting import curdoc, figure
 from bokeh.layouts import column, row
 
@@ -10,7 +10,7 @@ from upload import uploadButton
 from ldparser import ldparser
 import acctelemetry
 import figures
-
+import laptable
 
 def callback():
     button.disabled = True
@@ -26,9 +26,13 @@ def callback():
         laps = acctelemetry.laps(f_)
         laps_limits = acctelemetry.laps_limits(laps, chans[4].freq, len(chans[4].data))
 
+        laps = np.array(laps)
+        laps_times = [laps[0]]
+        laps_times.extend(list(laps[1:]-laps[:-1]))
 
         # create pandas DataFrame
-        df_ = acctelemetry.createDataFrame(chans, laps_limits)
+        df_ = acctelemetry.createDataFrame(
+            filter_source.data['name'][idx], chans, laps_times, laps_limits)
         # restrict to selected lap
         lap = int(filter_source.data['lap'][idx])
         df_ = df_[df_.lap==lap]
@@ -54,62 +58,7 @@ def callback():
     button.disabled = False
 
 
-
-columns = [
-    TableColumn(field="name", title="File name"),
-    TableColumn(field="datetime", title="Datetime"),
-    TableColumn(field="track", title="Track"),
-    TableColumn(field="car", title="Car"),
-    TableColumn(field="lap", title="Lap"),
-    TableColumn(field="time", title="Lap time"),
-]
-
-source = ColumnDataSource()
-filter_source = ColumnDataSource()
-data_table = DataTable(source=filter_source, columns=columns, width=800)
-
-### https://gist.github.com/dennisobrien/450d7da20daaba6d39d0
-# callback code to be used by all the filter widgets
-combined_callback_code = """
-var data = filter_source.data;
-var original_data = source.data;
-var track = track_select_obj.value;
-var car = car_select_obj.value;
-for (var key in original_data) {
-    data[key] = [];
-    for (var i = 0; i < original_data['track'].length; ++i) {
-        if ((track === "ALL" || original_data['track'][i] === track) &&
-                (car === "ALL" || original_data['car'][i] === car)) {
-            data[key].push(original_data[key][i]);
-        }
-    }
-}
-
-filter_source.change.emit();
-target_obj.change.emit();
-"""
-
-# define the filter widgets, without callbacks for now
-track_select = Select(title="Track:", value='ALL', options=['ALL'])
-car_select = Select(title="Car:", value='ALL', options=['ALL'])
-
-# now define the callback objects now that the filter widgets exist
-generic_callback = CustomJS(
-    args=dict(source=source,
-              filter_source=filter_source,
-              track_select_obj=track_select,
-              car_select_obj=car_select,
-              target_obj=data_table),
-    code=combined_callback_code
-)
-
-# finally, connect the callbacks to the filter widgets
-track_select.js_on_change('value', generic_callback)
-car_select.js_on_change('value', generic_callback)
-filters = row(track_select, car_select)
-######
-
-
+filters, data_table, source, filter_source, track_select, car_select = laptable.create()
 acctelemetry.updateTableData(
     source, filter_source, track_select, car_select)
 
@@ -126,8 +75,9 @@ for ttl in ["LapData", "RPMs", "Wheelspeed", "Over/Understeer", "Susp Trvl"]:
     figs.append(row(figure(plot_height=500, plot_width=800)))
     tabs.append(Panel(child=figs[-1], title=ttl))
 
-tabs_ = Tabs(tabs=tabs)
+tabs.append(Panel(child=figures.getLapDelta(), title="LapsDelta"))
 
+tabs_ = Tabs(tabs=tabs)
 curdoc().add_root(tabs_)
 
 # source.selected = {'0d': {'glyph': None, 'indices': []},
