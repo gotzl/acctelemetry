@@ -1,12 +1,12 @@
 import os, itertools
 import numpy as np
 import pandas as pd
-
+from bokeh.io import curdoc
 
 from bokeh.palettes import Spectral4, Dark2_5 as palette
 from bokeh.plotting import figure
 from bokeh.models import CrosshairTool, HoverTool, CustomJS, \
-    LinearAxis, ColumnDataSource, Range1d, TextInput, Circle, Select, Line
+    LinearAxis, ColumnDataSource, Range1d, TextInput, Circle, Select, Line, Button, Selection, Slider
 from bokeh.layouts import gridplot, column, row
 
 import acctelemetry, laptable
@@ -68,6 +68,8 @@ def getFigure(sources, x='dist_lap', width=800):
     ]
 
     # some JS needed to link crosshairs
+    # TODO: replace with
+    # https://stackoverflow.com/questions/37965669/how-do-i-link-the-crosshairtool-in-bokeh-over-several-plots
     js_move = '''
         if(cb_obj.x >= fig.x_range.start && cb_obj.x <= fig.x_range.end &&
            cb_obj.y >= fig.y_range.start && cb_obj.y <= fig.y_range.end)
@@ -402,15 +404,22 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     # the hover effect is configured below
     r2 = p1.scatter(x='x', y='y', source=ds, color='color_%s'%mode)
     r2.nonselection_glyph = r2.selection_glyph
+
+    # calculate points for the reference map drawn 'outside' of the other track map
     if mode not in ['absolut', 'gainloss']:
-        ds.data['xr'] = df_.x+30*np.cos(df_.heading+np.pi/2)
-        ds.data['yr'] = df_.y+30*np.sin(df_.heading+np.pi/2)
+        ds.data['xr'] = df_.xr+30*np.cos(df_.heading+np.pi/2)
+        ds.data['yr'] = df_.yr+30*np.sin(df_.heading+np.pi/2)
         r3 = p1.scatter(x='xr', y='yr', source=ds, color='color_%s_r'%mode)
         r3.nonselection_glyph = r3.selection_glyph
 
-
-    # p0.add_tools(createHoverTool(['time','dist_lap','speedkmh','dt']))
-    # p1.add_tools(createHoverTool(['time','dist_lap','speedkmh','dt']))
+    h = createHoverTool(['time','dist','speed','dt'])
+    # https://stackoverflow.com/questions/36434562/displaying-only-one-tooltip-when-using-the-hovertool-tool
+    h.tooltips.append(("VirtualItem", """@{IsVirtual}
+        <style>
+            .bk-tooltip>div:not(:first-child) {display:none;}
+        </style>"""))
+    p0.add_tools(h)
+    p1.add_tools(h)
 
     # create a invisible renderer for velo vs dist
     # this is used to trigger the hover, thus the size is large
@@ -421,11 +430,20 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     # create a invisible renderer for the track map
     # this is used to trigger the hover, thus the size is large
     c1 = p1.circle(x='x', y='y', source=ds, size=10, fill_alpha=0.0, alpha=0.0)
-    c1.selection_glyph = Circle(fill_color='red', fill_alpha=1., line_color=None)
+    c1.selection_glyph = Circle(fill_color='red', fill_alpha=.7, line_color=None)
     c1.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
 
+    cr = p1.circle(x='xr', y='yr', source=ds,
+                   size = 8 if mode in ['absolut', 'gainloss'] else 10,
+                   fill_alpha=0.0, alpha=0.0)
+    cr.selection_glyph = Circle(fill_color='blue', fill_alpha=.7, line_color=None)
+    cr.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
+
     # create the hover tools with a callback to trigger the update on the other plots
-    code = "source.selected = cb_data['index']; source.change.emit()";
+    # code = "source.selected = cb_data['index']; source.change.emit();"
+    code = "cb_data['index'].indices = [cb_data['index'].indices[0]];" \
+           "source.selected = cb_data['index'];" \
+           "source.change.emit();"
     callback = CustomJS(args={'source': ds}, code=code)
     hover0 = HoverTool(tooltips=None, callback=callback, renderers=[c0])
     hover0.point_policy='snap_to_data'
@@ -436,4 +454,74 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
 
     p0.add_tools(hover0)
     p1.add_tools(hover)
-    return column(p0, p1)
+
+    # create a player that iterates over the data
+    def increment(stepsize, direction=1):
+        idxs = ds.selected.indices
+        if idxs is None or \
+                len(idxs)==0 or \
+                idxs[0] is None:
+            i = 0
+        else:
+            i = idxs[0] + direction*stepsize
+        if i<0: i = 0
+        if i>len(ds.data['dist']): i = len(ds.data['dist'])-1
+        ds.selected = Selection(indices=[i])
+        ds.trigger('data', ds.data, ds.data)
+
+    def callback():
+        increment(5)
+
+    def cbcrl(stop=False):
+        global cb
+
+        if cb is None and not stop:
+            cb = curdoc().add_periodic_callback(callback, 5*50)
+            # reset hovertool
+            hover0.renderers = []
+            hover.renderers = []
+            play.label = "Pause"
+        else:
+            try:  curdoc().remove_periodic_callback(cb)
+            except: pass
+            cb = None
+            play.label = "Play"
+            if stop:
+                # reset hovertool and selection
+                ds.selected = Selection(indices=[])
+                ds.trigger('data', ds.data, ds.data)
+                hover0.renderers = [c0]
+                hover.renderers = [c1]
+
+    def stopcb():
+        cbcrl(stop=True)
+
+    global cb
+    if not 'cb' in globals():
+        cb = None
+    if cb is not None:
+        try:  curdoc().remove_periodic_callback(cb)
+        except: cb = None
+
+    play = Button(label="Play")
+    play.on_click(cbcrl)
+
+    stop = Button(label="Stop")
+    stop.on_click(stopcb)
+
+    btns = []
+    def bb(): increment(50, -1)
+    def b(): increment(5, -1)
+    def f(): increment(5, 1)
+    def ff(): increment(50, 1)
+    for l,s in [('<<',bb),('<',b),('>',f),('>>',ff)]:
+        b = Button(label=l, width=50)
+        b.on_click(s)
+        btns.append(b)
+
+    slider = Slider(start=0, end=len(ds.data['dist_lap']),value=0, step=50)
+    def update(i):
+        ds.selected = Selection(indices=[i])
+        ds.trigger('data', ds.data, ds.data)
+    slider.on_change('value', lambda attr, old, new: update(new))
+    return column(row(play, stop, *btns), slider, p0, p1)

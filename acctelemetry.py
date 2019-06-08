@@ -157,9 +157,11 @@ def lapdelta(df, reference, target):
         :param df:      the dataframe to iterate
         :param offset:  offset to checking df
         :param direction: iteration direction
-        :return: idx in df or -1
+        :return: idx in df
         """
         idx = offset
+        if idx>len(df): return len(df)-1
+
         while idx < len(df) - 1 and idx>=0:
             d = dist - df.dist_lap.values[idx]
             if d<=0 and direction>0: return idx
@@ -169,11 +171,15 @@ def lapdelta(df, reference, target):
 
     # for each track position in a with time ta
     # - find track position in b, interpolate
-    dt_, speed, throttle, brake, g_lat = [],[],[],[],[]
-    b_idx = 0
+    dt_, speed, speedkmh, throttle, brake, g_lon, xr, yr = [],[],[],[],[],[],[],[]
+    a_idx,b_idx = 0,0
     for idx in range(len(df_a)):
         # the b_idx closest to current track position in a
         b_idx = findidx(df_a.dist_lap.values[idx], df_b, b_idx)
+
+        # the a_idx closest to track position in b at the time of t_a
+        # this is needed to get the x,y coords of the reference
+        a_idx = findidx(df_b.dist_lap.values[idx if idx<len(df_b) else len(df_b)-1], df_a, a_idx)
 
         # distance difference of pos in a and b
         ds = df_a.dist_lap.values[idx]-df_b.dist_lap.values[b_idx]
@@ -181,11 +187,15 @@ def lapdelta(df, reference, target):
 
         # time difference between a and b for current track position in a
         dt_.append(df_a.time_lap.values[idx] - (df_b.time_lap.values[b_idx]+dt))
-        for i in ['speed', 'throttle', 'brake', 'g_lat']:
+        xr.append(df_a.x.values[a_idx])
+        yr.append(df_a.y.values[a_idx])
+        for i in ['speed', 'speedkmh', 'throttle', 'brake', 'g_lon']:
             eval(i).append(df_b[i].values[b_idx])
 
     df_a = df_a.assign(dt=pd.Series(dt_).values)
-    for i in ['speed', 'throttle', 'brake', 'g_lat']:
+    df_a = df_a.assign(xr=pd.Series(xr).values)
+    df_a = df_a.assign(yr=pd.Series(yr).values)
+    for i in ['speed', 'speedkmh', 'throttle', 'brake', 'g_lon']:
         df_a = df_a.assign(**{'%s_r'%i:pd.Series(eval(i)).values})
 
     return df_a, df_b
@@ -238,8 +248,8 @@ def pedlascolor(df, ref=False):
 
     color_pedals = []
     for thr, brk in zip(
-            df.throttle.rolling(10).mean().values,
-            df.brake.rolling(10).mean().values):
+            df[t].rolling(10).mean().values,
+            df[b].rolling(10).mean().values):
         if abs(thr-brk)<10: c = cmapb
         elif thr>brk: c = cmapg
         else: c = cmapr
@@ -252,7 +262,7 @@ def gloncolors(df, ref=False):
     if ref: g += '_r'
 
     color_g_lon = []
-    for g in df.g_lon.rolling(10).mean().values:
+    for g in df[g].rolling(10).mean().values:
         if g>0:
             color_g_lon.append(cmapg.to_rgba(g/max(df.g_lon)))
         else:
@@ -268,7 +278,7 @@ def addColorMaps(df, extra_maps=None):
     color_g_lon=gloncolors(df)
     color_pedals=pedlascolor(df)
 
-    color_speed_r=cmap(1-df.speedkmh/300, True)
+    color_speed_r=cmap(1-df.speedkmh_r/300, True)
     color_g_lon_r=gloncolors(df, True)
     color_pedals_r=pedlascolor(df, True)
 
