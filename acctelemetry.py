@@ -1,12 +1,18 @@
 import os, glob, copy
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import matplotlib.colors as mplcolors
 import matplotlib.cm as mplcm
 
 import xml.etree.ElementTree as ET
 
 from ldparser import ldparser
+
+norm = mplcolors.Normalize(vmin=-.1, vmax=1)
+cmapg = mplcm.ScalarMappable(norm=norm, cmap=mplcm.Greens)
+cmapr = mplcm.ScalarMappable(norm=norm, cmap=mplcm.Reds)
+cmapb = mplcm.ScalarMappable(norm=norm, cmap=mplcm.Blues)
 
 
 def laps(f):
@@ -163,7 +169,7 @@ def lapdelta(df, reference, target):
 
     # for each track position in a with time ta
     # - find track position in b, interpolate
-    dt_ = []
+    dt_, speed, throttle, brake, g_lat = [],[],[],[],[]
     b_idx = 0
     for idx in range(len(df_a)):
         # the b_idx closest to current track position in a
@@ -175,7 +181,14 @@ def lapdelta(df, reference, target):
 
         # time difference between a and b for current track position in a
         dt_.append(df_a.time_lap.values[idx] - (df_b.time_lap.values[b_idx]+dt))
-    return np.array(dt_), df_a, df_b
+        for i in ['speed', 'throttle', 'brake', 'g_lat']:
+            eval(i).append(df_b[i].values[b_idx])
+
+    df_a = df_a.assign(dt=pd.Series(dt_).values)
+    for i in ['speed', 'throttle', 'brake', 'g_lat']:
+        df_a = df_a.assign(**{'%s_r'%i:pd.Series(eval(i)).values})
+
+    return df_a, df_b
 
 
 def running_mean(x, N):
@@ -215,6 +228,61 @@ def deltacolors(dt, style=None):
             if dt<0 else cmapr.to_rgba(dt/max_dt)
             for dt in dt]
 
+
+def pedlascolor(df, ref=False):
+    t = 'throttle'
+    b = 'brake'
+    if ref:
+        t += '_r'
+        b += '_r'
+
+    color_pedals = []
+    for thr, brk in zip(
+            df.throttle.rolling(10).mean().values,
+            df.brake.rolling(10).mean().values):
+        if abs(thr-brk)<10: c = cmapb
+        elif thr>brk: c = cmapg
+        else: c = cmapr
+        color_pedals.append(c.to_rgba(max(thr,brk)/150))
+
+    return color_pedals
+
+def gloncolors(df, ref=False):
+    g = 'g_lon'
+    if ref: g += '_r'
+
+    color_g_lon = []
+    for g in df.g_lon.rolling(10).mean().values:
+        if g>0:
+            color_g_lon.append(cmapg.to_rgba(g/max(df.g_lon)))
+        else:
+            color_g_lon.append(cmapr.to_rgba(abs(g)/max(df.g_lon.abs())))
+
+    return color_g_lon
+
+
+def addColorMaps(df, extra_maps=None):
+    cmap = plt.get_cmap("jet")
+
+    color_speed=cmap(1-df.speedkmh/300)
+    color_g_lon=gloncolors(df)
+    color_pedals=pedlascolor(df)
+
+    color_speed_r=cmap(1-df.speedkmh/300, True)
+    color_g_lon_r=gloncolors(df, True)
+    color_pedals_r=pedlascolor(df, True)
+
+    # convert colors to s.t. bokeh understands
+    to_bokeh = lambda c: list(map(mplcolors.to_hex, c))
+    for c in ['color_speed', 'color_pedals', 'color_g_lon',
+              'color_speed_r', 'color_pedals_r', 'color_g_lon_r']:
+        df = df.assign(**{c:pd.Series(to_bokeh(eval(c))).values})
+
+    if extra_maps is not None:
+        for c, v in extra_maps.items():
+            df = df.assign(**{c:pd.Series(to_bokeh(v)).values})
+
+    return df
 
 
 def scanFiles(files):

@@ -1,7 +1,7 @@
 import os, itertools
 import numpy as np
 import pandas as pd
-import matplotlib.colors as mplcolors
+
 
 from bokeh.palettes import Spectral4, Dark2_5 as palette
 from bokeh.plotting import figure
@@ -344,37 +344,31 @@ def getLapDelta():
     text_input = TextInput(value="nothing selected")
     text_input.disabled = True
 
-    mode_select = Select(title="Mode:", value='absolut', options=['absolut','gainloss'])
+    mode_select = Select(title="Mode:", value='absolut',
+                         options=['absolut',
+                                  'gainloss',
+                                  'speed',
+                                  'pedals',
+                                  'g_lon'])
     mode_select.on_change('value', mode_change)
 
     filter_source.selected.on_change('indices', callback_)
     tmp = figure(plot_height=500, plot_width=800)
     fig = row(tmp)
-    return column(filters,data_table,text_input,mode_select,fig)
+    return column(filters,data_table,mode_select,text_input,fig)
 
 
 def getLapDeltaFigure(df, reference, target, mode='absolut'):
+    df_, df_r = acctelemetry.lapdelta(df, reference, target)
+    color_absolut = acctelemetry.deltacolors(df_.dt.values)
+    color_gainloss = acctelemetry.deltacolors(df_.dt.values, style='grad')
 
-    dt_, df_, df_r = acctelemetry.lapdelta(df, reference, target)
-    color = acctelemetry.deltacolors(dt_)
-    color_grad = acctelemetry.deltacolors(dt_, style='grad')
-
-    color = list(map(mplcolors.to_hex, color))
-    color_grad = list(map(mplcolors.to_hex, color_grad))
-
-    df_ = df_.assign(dt=pd.Series(dt_).values)
-    df_ = df_.assign(color_absolut=pd.Series(color).values)
-    df_ = df_.assign(color_grad=pd.Series(color_grad).values)
+    # add colors to dataframe
+    df_ = acctelemetry.addColorMaps(df_, {'color_absolut':color_absolut,
+                                          'color_gainloss':color_gainloss})
 
     p0 = figure(plot_height=400, plot_width=800,
                 tools="crosshair,pan,reset,save,wheel_zoom")
-
-    lim = max(abs(dt_))
-    lim += lim*.2
-    p0.extra_y_ranges = {"dt": Range1d(start=-lim, end=lim)}
-    p0.add_layout(LinearAxis(
-        y_range_name='dt',
-        axis_label='dt [s]'), 'right')
 
     ds = ColumnDataSource(df_)
     colors = itertools.cycle(palette)
@@ -388,7 +382,13 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     r0.selection_glyph = nonselected_
     r0.nonselection_glyph = nonselected_
 
-    # create the dt vs dist plot, set the (non)selection glyphs
+    # create the dt vs dist plot with extra y axis, set the (non)selection glyphs
+    lim = max(df_.dt.abs())
+    lim += lim*.2
+    p0.extra_y_ranges = {"dt": Range1d(start=-lim, end=lim)}
+    p0.add_layout(LinearAxis(
+        y_range_name='dt',
+        axis_label='dt [s]'), 'right')
     r1 = p0.line(x='dist_lap', y='dt', source=ds, y_range_name='dt', color=c1, line_width=2)
     r1.selection_glyph = Line(line_alpha=1, line_color='red', line_width=5)
     r1.nonselection_glyph = Line(line_alpha=1, line_color=c1, line_width=2)
@@ -400,9 +400,14 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     p1 = figure(plot_height=400, plot_width=800, tools="crosshair,pan,reset,save,wheel_zoom")
     # plot the track map, overwrite the (non)selection glyph to keep our color from ds
     # the hover effect is configured below
-    r2 = p1.scatter(x='x', y='y', source=ds,
-                    color='color_grad' if mode=='gainloss' else 'color_absolut')
+    r2 = p1.scatter(x='x', y='y', source=ds, color='color_%s'%mode)
     r2.nonselection_glyph = r2.selection_glyph
+    if mode not in ['absolut', 'gainloss']:
+        ds.data['xr'] = df_.x+30*np.cos(df_.heading+np.pi/2)
+        ds.data['yr'] = df_.y+30*np.sin(df_.heading+np.pi/2)
+        r3 = p1.scatter(x='xr', y='yr', source=ds, color='color_%s_r'%mode)
+        r3.nonselection_glyph = r3.selection_glyph
+
 
     # p0.add_tools(createHoverTool(['time','dist_lap','speedkmh','dt']))
     # p1.add_tools(createHoverTool(['time','dist_lap','speedkmh','dt']))
