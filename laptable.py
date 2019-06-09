@@ -3,7 +3,6 @@ from bokeh.models import ColumnDataSource, CustomJS
 from bokeh.layouts import row
 
 
-
 def create():
     columns = [
         TableColumn(field="name", title="File name"),

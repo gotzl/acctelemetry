@@ -1,6 +1,7 @@
 import os, itertools
 import numpy as np
 from bokeh.io import curdoc
+import matplotlib.colors as mplcolors
 
 from bokeh.palettes import Spectral4, Dark2_5 as palette
 from bokeh.plotting import figure
@@ -10,6 +11,7 @@ from bokeh.layouts import gridplot, column, row
 
 import acctelemetry, laptable
 from ldparser import ldparser
+
 
 def createHoverTool(tools, mode='mouse'):
     _tools = dict(
@@ -350,6 +352,8 @@ def getLapDelta():
                                   'gainloss',
                                   'speed',
                                   'pedals',
+                                  'throttle',
+                                  'brake',
                                   'g_lon'])
     mode_select.on_change('value', mode_change)
 
@@ -361,17 +365,30 @@ def getLapDelta():
 
 def getLapDeltaFigure(df, reference, target, mode='absolut'):
     df_, df_r = acctelemetry.lapdelta(df, reference, target)
-    color_absolut = acctelemetry.deltacolors(df_.dt.values)
-    color_gainloss = acctelemetry.deltacolors(df_.dt.values, style='grad')
 
-    # add colors to dataframe
-    df_ = acctelemetry.addColorMaps(df_, {'color_absolut':color_absolut,
-                                          'color_gainloss':color_gainloss})
+    # add required colors to dataframe and create datasource
+    color_mode_map = {'absolut': acctelemetry.adddeltacolors,
+                'gainloss': lambda x: acctelemetry.adddeltacolors(x, 'grad'),
+                'g_lon': acctelemetry.addgloncolors,
+                'speed':acctelemetry.addspeedcolors,
+                'pedals':acctelemetry.addpedalscolors,
+                'throttle':acctelemetry.addpedalscolors,
+                'brake':acctelemetry.addpedalscolors,
+                }
+    df_ = color_mode_map[mode](df_)
+
+    ds = ColumnDataSource(df_)
+
+    to_bokeh = lambda c: list(map(mplcolors.to_hex, c))
+    ds.data['color'] = to_bokeh(df_['color_%s'%mode])
+    if mode not in ['absolut', 'gainloss']:
+        df_ = color_mode_map[mode](df_, ref=True)
+        ds.data['color_r'] = to_bokeh(df_['color_%s_r'%mode])
+
 
     p0 = figure(plot_height=400, plot_width=800,
                 tools="crosshair,pan,reset,save,wheel_zoom")
 
-    ds = ColumnDataSource(df_)
     colors = itertools.cycle(palette)
     c0,c1 = next(colors),next(colors)
 
@@ -401,14 +418,14 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     p1 = figure(plot_height=400, plot_width=800, tools="crosshair,pan,reset,save,wheel_zoom")
     # plot the track map, overwrite the (non)selection glyph to keep our color from ds
     # the hover effect is configured below
-    r2 = p1.scatter(x='x', y='y', source=ds, color='color_%s'%mode)
+    r2 = p1.scatter(x='x', y='y', source=ds, color='color')
     r2.nonselection_glyph = r2.selection_glyph
 
     # calculate points for the reference map drawn 'outside' of the other track map
     if mode not in ['absolut', 'gainloss']:
         ds.data['xr'] = df_.xr+30*np.cos(df_.heading+np.pi/2)
         ds.data['yr'] = df_.yr+30*np.sin(df_.heading+np.pi/2)
-        r3 = p1.scatter(x='xr', y='yr', source=ds, color='color_%s_r'%mode)
+        r3 = p1.scatter(x='xr', y='yr', source=ds, color='color')
         r3.nonselection_glyph = r3.selection_glyph
 
     # create a invisible renderer for velo vs dist

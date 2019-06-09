@@ -130,6 +130,7 @@ def createDataFrame(file_, channs, laps_times, laps_limits):
         {'x':x,'y':y,
          # 'xl':xl,'yl':yl,
          'steering_corr':steering_corr,
+         'neutral_steering':neutral_steering,
          'oversteer':oversteer,
          'understeer':understeer})], axis=1)
     return df
@@ -201,13 +202,7 @@ def lapdelta(df, reference, target):
     return df_a, df_b
 
 
-def running_mean(x, N):
-    # np.convolve(dt_, np.ones((10,))/10, mode='valid')
-    cumsum = np.cumsum(np.insert(x, 0, 0))
-    return (cumsum[N:] - cumsum[:-N]) / float(N)
-
-
-def deltacolors(dt, style=None):
+def adddeltacolors(df, style=None):
     """
     Get colors for delta time
     :param dt:      the delta times
@@ -215,84 +210,72 @@ def deltacolors(dt, style=None):
                     grad: color maps to the derivative of dt, red -> loosing, green -> gaining
     :return:        list of colors
     """
-    norm = mplcolors.Normalize(vmin=-.3, vmax=1)
-    cmapg = mplcm.ScalarMappable(norm=norm, cmap=mplcm.Greens)
-    cmapr = mplcm.ScalarMappable(norm=norm, cmap=mplcm.Reds)
-    cmapb = mplcm.ScalarMappable(norm=norm, cmap=mplcm.Blues)
-
-    max_dt = max(abs(dt))
+    dt = df.dt.rolling(20, min_periods=1).mean()
     if style == 'grad':
-        dt_grad = np.gradient(list(dt[:19])+list(running_mean(dt, 20)))
-        color = []
-        max_mini_dt = max(abs(dt_grad))
-        for dt in dt_grad:
-            if abs(dt)<.001:
-                c = cmapb
-            elif dt<0:
-                c = cmapg
-            else: c = cmapr
-            color.append(c.to_rgba(abs(dt/max_mini_dt)))
-        return color
+        dt = pd.Series(np.gradient(dt), index=df.index)
+        m = dt.abs().max()
+        b_ = dt[(dt.abs()<=.001)].map(lambda x:cmapb.to_rgba(x/m))
+        r_ = dt[(dt.abs()>.001) & (dt>0)].abs().map(lambda x:cmapr.to_rgba(x/m))
+        g_ = dt[(dt.abs()>.001) & (dt<0)].abs().map(lambda x:cmapg.to_rgba(x/m))
+        return df.assign(color_gainloss=pd.concat([b_,g_,r_]))
 
-    return [cmapg.to_rgba(abs(dt/max_dt))
-            if dt<0 else cmapr.to_rgba(dt/max_dt)
-            for dt in dt]
+    m = dt.max()
+    g_ = dt[(dt>=0)].map(lambda x:cmapg.to_rgba(x/m))
+    r_ = dt[(dt<0)].abs().map(lambda x:cmapr.to_rgba(x/m))
+    return df.assign(color_absolut=pd.concat([g_,r_]))
 
 
-def pedlascolor(df, ref=False):
+def addpedalscolors(df, ref=False):
     t = 'throttle'
     b = 'brake'
     if ref:
         t += '_r'
         b += '_r'
 
-    color_pedals = []
-    for thr, brk in zip(
-            df[t].rolling(10).mean().values,
-            df[b].rolling(10).mean().values):
-        if abs(thr-brk)<10: c = cmapb
-        elif thr>brk: c = cmapg
-        else: c = cmapr
-        color_pedals.append(c.to_rgba(max(thr,brk)/150))
+    t_ = df[t].rolling(10, min_periods=1).mean()
+    b_ = df[b].rolling(10, min_periods=1).mean()
 
-    return color_pedals
+    tc_ = t_.map(lambda x:cmapg.to_rgba(x/150))
+    bc_ = b_.map(lambda x:cmapr.to_rgba(x/150))
 
-def gloncolors(df, ref=False):
+    df = df.assign(**{'color_%s'%t:tc_})
+    df = df.assign(**{'color_%s'%b:bc_})
+
+    # tmp_ = pd.merge(t_, b_, left_index=True, right_index=True)
+    # b_ = tmp_[((t_ - b_).abs() < 10)]
+    # b0_ = b_[(t_<b_)][b].map(lambda x:cmapb.to_rgba(x/150))
+    # b1_ = b_[(t_>=b_)][t].map(lambda x:cmapb.to_rgba(x/150))
+    #
+    # r_ = df[((t_ - b_).abs() >= 10) & (t_<b_)][b]
+    # g_ = df[((t_ - b_).abs() >= 10) & (t_>=b_)][t]
+
+    r_ = df[(t_<b_)]['color_%s'%b]
+    g_ = df[(t_>=b_)]['color_%s'%t]
+
+    n_ = 'pedals'
+    if ref: n_ += '_r'
+    return df.assign(**{'color_%s'%n_:pd.concat([g_,r_])})
+
+
+def addgloncolors(df, ref=False):
     g = 'g_lon'
     if ref: g += '_r'
 
-    color_g_lon = []
-    for g in df[g].rolling(10).mean().values:
-        if g>0:
-            color_g_lon.append(cmapg.to_rgba(g/max(df.g_lon)))
-        else:
-            color_g_lon.append(cmapr.to_rgba(abs(g)/max(df.g_lon.abs())))
+    g_lon = df[g].rolling(10, min_periods=1).mean()
+    m0,m1 = g_lon.max(), g_lon.abs().max()
+    g_ = g_lon[(g_lon>=0)].map(lambda x:cmapg.to_rgba(x/m0))
+    r_ = g_lon[(g_lon<0)].abs().map(lambda x:cmapr.to_rgba(x/m1))
 
-    return color_g_lon
+    return df.assign(**{'color_%s'%g:pd.concat([g_,r_])})
 
 
-def addColorMaps(df, extra_maps=None):
+def addspeedcolors(df, ref=False):
+    g = 'speedkmh'
+    if ref: g += '_r'
+
     cmap = plt.get_cmap("jet")
-
-    color_speed=cmap(1-df.speedkmh/300)
-    color_g_lon=gloncolors(df)
-    color_pedals=pedlascolor(df)
-
-    color_speed_r=cmap(1-df.speedkmh_r/300, True)
-    color_g_lon_r=gloncolors(df, True)
-    color_pedals_r=pedlascolor(df, True)
-
-    # convert colors to s.t. bokeh understands
-    to_bokeh = lambda c: list(map(mplcolors.to_hex, c))
-    for c in ['color_speed', 'color_pedals', 'color_g_lon',
-              'color_speed_r', 'color_pedals_r', 'color_g_lon_r']:
-        df = df.assign(**{c:pd.Series(to_bokeh(eval(c))).values})
-
-    if extra_maps is not None:
-        for c, v in extra_maps.items():
-            df = df.assign(**{c:pd.Series(to_bokeh(v)).values})
-
-    return df
+    g_ = df[g].map(lambda x:cmap(1-x/300))
+    return df.assign(**{'color_speed%s'%('_r' if ref else '') :g_})
 
 
 def scanFiles(files):

@@ -12,12 +12,12 @@ import acctelemetry
 import figures
 import laptable
 
+
 def callback():
     button.disabled = True
     s = []
     df = None
     idxs = filter_source.selected.indices
-    # idxs = source.selected['1d']['indices']
 
     for idx in idxs:
         f_ = os.environ['TELEMETRY_FOLDER']+'/%s'%filter_source.data['name'][idx]
