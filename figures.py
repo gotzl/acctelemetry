@@ -6,7 +6,8 @@ import matplotlib.colors as mplcolors
 from bokeh.palettes import Spectral4, Dark2_5 as palette
 from bokeh.plotting import figure
 from bokeh.models import CrosshairTool, HoverTool, CustomJS, \
-    LinearAxis, ColumnDataSource, Range1d, TextInput, Circle, Select, Line, Button, Selection, Slider, TapTool, LabelSet
+    LinearAxis, ColumnDataSource, Range1d, TextInput, Circle, Select, Line, Button, Selection, Slider, TapTool, \
+    LabelSet, Text
 from bokeh.layouts import gridplot, column, row
 
 import acctelemetry, laptable
@@ -420,6 +421,18 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     # the hover effect is configured below
     r2 = p1.scatter(x='x', y='y', source=ds, color='color')
     r2.nonselection_glyph = r2.selection_glyph
+
+    # add some lap descriptions
+    corners = acctelemetry.corners(df_)
+    corners_ds = ColumnDataSource(dict(
+        x=df_.x.values[corners],
+        y=df_.y.values[corners],
+        text=['T%i'%i for i in range(1, len(corners)+1)],
+    ))
+    labels = LabelSet(x='x', y='y', text='text', level='glyph',
+                      x_offset=5, y_offset=5,
+                      source=corners_ds, render_mode='canvas')
+    p1.add_layout(labels)
 
     # calculate points for the reference map drawn 'outside' of the other track map
     if mode not in ['absolut', 'gainloss']:

@@ -216,12 +216,12 @@ def adddeltacolors(df, style=None):
         m = dt.abs().max()
         b_ = dt[(dt.abs()<=.001)].map(lambda x:cmapb.to_rgba(x/m))
         r_ = dt[(dt.abs()>.001) & (dt>0)].abs().map(lambda x:cmapr.to_rgba(x/m))
-        g_ = dt[(dt.abs()>.001) & (dt<0)].abs().map(lambda x:cmapg.to_rgba(x/m))
+        g_ = dt[(dt.abs()>.001) & (dt<=0)].abs().map(lambda x:cmapg.to_rgba(x/m))
         return df.assign(color_gainloss=pd.concat([b_,g_,r_]))
 
     m = dt.max()
-    g_ = dt[(dt>=0)].map(lambda x:cmapg.to_rgba(x/m))
-    r_ = dt[(dt<0)].abs().map(lambda x:cmapr.to_rgba(x/m))
+    g_ = dt[(dt<0)].abs().map(lambda x:cmapg.to_rgba(x/m))
+    r_ = dt[(dt>=0)].abs().map(lambda x:cmapr.to_rgba(x/m))
     return df.assign(color_absolut=pd.concat([g_,r_]))
 
 
@@ -276,6 +276,57 @@ def addspeedcolors(df, ref=False):
     cmap = plt.get_cmap("jet")
     g_ = df[g].map(lambda x:cmap(1-x/300))
     return df.assign(**{'color_speed%s'%('_r' if ref else '') :g_})
+
+
+def running_mean(x, N, min_periods=None):
+    if min_periods is None: min_periods=N
+    cumsum = np.cumsum(np.insert(x, 0, 0))
+    return np.append(x[:N-min_periods], (cumsum[N:] - cumsum[:-N]) / float(N))
+
+
+def corners(df):
+    g_lat = df.g_lat.rolling(50, 1).mean()
+    # the g_lat gradient
+    grad = running_mean(np.gradient(g_lat), 50, 1)
+    # get zero crossings, indicating a max/min in g_lat -> apex of corner
+    # ommit the first 50 samples
+    zero_x = np.where(np.diff(np.sign(grad[50:])))[0]
+    zero_x += 50
+    # require a minimum g_lat
+    # zero_x = np.extract(g_lat.abs().values[zero_x]>0.1, zero_x)
+    keep = []
+    for x in zero_x:
+        # if max(g_lat.abs().values[x-50:x])<0.4: continue
+        if g_lat.abs().values[x-50:x].mean()<0.4: continue
+        keep.append(x)
+    zero_x = keep
+
+    # require that successive corners have eather a different direction
+    new_zero_x = []
+    for x in zero_x:
+        corners = np.extract( abs(zero_x-x) < 100, zero_x)
+        corners = np.extract( corners!=x, corners)
+        # no close corners
+        if len(corners)==0:
+            new_zero_x.append(x)
+            continue
+
+        # check the direction of the corners
+        corners_dir = g_lat.values[corners]
+        corners_same_dir = np.extract(
+            np.sign(corners_dir)==np.sign(g_lat.values[x]), corners)
+
+        # the corners are different direction than the current one
+        if len(corners_same_dir) != len(corners):
+            new_zero_x.append(x)
+            continue
+
+        # the corners are same direction, use the strongest one
+        if abs(g_lat.values[x])>max(abs(corners_dir)):
+            new_zero_x.append(x)
+            continue
+
+    return np.array(new_zero_x)-50
 
 
 def scanFiles(files):
