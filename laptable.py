@@ -20,7 +20,7 @@ def create():
     ### https://gist.github.com/dennisobrien/450d7da20daaba6d39d0
     # callback code to be used by all the filter widgets
     combined_callback_code = """
-    var data = filter_source.data;
+    var data = {};
     var original_data = source.data;
     var track = track_select_obj.value;
     var car = car_select_obj.value;
@@ -34,15 +34,16 @@ def create():
         }
     }
     
+    filter_source.data = data;
     filter_source.change.emit();
     target_obj.change.emit();
     """
 
-    # define the filter widgets, without callbacks for now
+    # define the filter widgets
     track_select = Select(title="Track:", value='ALL', options=['ALL'])
     car_select = Select(title="Car:", value='ALL', options=['ALL'])
 
-    # now define the callback objects now that the filter widgets exist
+    # define the callback object
     generic_callback = CustomJS(
         args=dict(source=source,
                   filter_source=filter_source,
@@ -52,7 +53,7 @@ def create():
         code=combined_callback_code
     )
 
-    # finally, connect the callbacks to the filter widgets
+    # connect the callbacks to the filter widgets
     track_select.js_on_change('value', generic_callback)
     car_select.js_on_change('value', generic_callback)
     filters = row(track_select, car_select)

@@ -18,6 +18,7 @@ def createHoverTool(tools, mode='mouse'):
     _tools = dict(
         dist=("Dist", "@dist_lap{%0.1f} m"),
         time=("Time", "@time_lap{%0.1f} s"),
+        dt=("Dt", "@dt{%0.3f} s"),
         speed=("Speed", "@speed m/s"),
         speedkmh=("Speed", "@speedkmh km/h"),
         rpms=("RPMs","@rpms"),
@@ -31,6 +32,7 @@ def createHoverTool(tools, mode='mouse'):
         tooltips=[_tool(x) for x in tools],
         formatters={'dist' : 'printf',
                     'time' : 'printf',
+                    'dt' : 'printf',
                     'dist_lap' : 'printf',
                     'time_lap' : 'printf',
                     },
@@ -284,12 +286,12 @@ def getLapDelta():
         source, filter_source, track_select, car_select)
 
     def callback_(attrname, old, new):
-        callback("absolut")
+        callback(mode_select.value)
 
     def callback(mode):
         idxs = filter_source.selected.indices
         if (len(idxs)<2):
-            fig.children[0] = tmp
+            layout.children[-1] = tmp
             return
 
         df, track, reference, target = None, None, None, None
@@ -325,7 +327,7 @@ def getLapDelta():
                 target = info
 
         if reference is None or target is None:
-            fig.children[0] = tmp
+            layout.children[-1] = tmp
             return
 
         text_input.value = "%s: reference: %s (%i) | target: %s (%i)"%(track, reference,idxs[0],target,idxs[-1])
@@ -333,17 +335,10 @@ def getLapDelta():
                            (track, mode, reference[2], reference[3], idxs[0],
                             target[2], target[3], idxs[-1])
 
-        fig.children[0] = getLapDeltaFigure(df, reference[:2], target[:2], mode)
+        layout.children[-1] = getLapDeltaFigure(df, reference[:2], target[:2], mode)
 
     def mode_change(attrname, old, new):
-        # if (old==new) or p1 is None: return
         callback(new)
-        # c = 'color_absolut'
-        # if new == 'gainloss':
-        #     c = 'color_grad'
-        # global ds
-        # ds.data['color'] = ds.data[c]
-        # ds.trigger('indices', None, None)
 
     text_input = TextInput(value="nothing selected")
     text_input.disabled = True
@@ -361,8 +356,8 @@ def getLapDelta():
 
     filter_source.selected.on_change('indices', callback_)
     tmp = figure(plot_height=500, plot_width=800)
-    fig = row(tmp)
-    return column(filters,data_table,mode_select,text_input,fig)
+    layout = column(filters,data_table,mode_select,text_input,tmp, id='labsdelta')
+    return layout
 
 
 def getLapDeltaFigure(df, reference, target, mode='absolut'):
@@ -370,13 +365,13 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
 
     # add required colors to dataframe and create datasource
     color_mode_map = {'absolut': acctelemetry.adddeltacolors,
-                'gainloss': lambda x: acctelemetry.adddeltacolors(x, 'grad'),
+                      'gainloss': lambda x: acctelemetry.adddeltacolors(x, 'grad'),
                       'g_lon': acctelemetry.addgloncolors,
                       'oversteer': acctelemetry.addoversteercolors,
-                'speed':acctelemetry.addspeedcolors,
-                'pedals':acctelemetry.addpedalscolors,
-                'throttle':acctelemetry.addpedalscolors,
-                'brake':acctelemetry.addpedalscolors,
+                      'speed':acctelemetry.addspeedcolors,
+                      'pedals':acctelemetry.addpedalscolors,
+                      'throttle':acctelemetry.addpedalscolors,
+                      'brake':acctelemetry.addpedalscolors,
                 }
     df_ = color_mode_map[mode](df_)
 
@@ -473,10 +468,6 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     hover0.mode = 'vline'
     hover0.line_policy='interp'
 
-    # hover1 = createHoverTool(['time','dist','speedkmh','dt'])
-    # hover1.tooltips = hover0.tooltips
-    # hover1.renderers = [c1]
-    # hover1.mode = 'mouse'
 
     # Enable selection update with slider
     slider = Slider(start=0, end=len(ds.data['dist_lap']),value=0, step=50)
@@ -500,11 +491,11 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
 
     # React on changes of the selection in the datasource. Display tooltips at the position of the selected point.
     code = """
-    console.log(figure.id+" "+hovertool.id+" "+renderer.id);
     let ind = slider.value;
     let x = source.data.dist_lap[ind];
     let y = source.data.speedkmh[ind];
-    let fig_view = Bokeh.index["tabs"].child_views[6].child_views[4]._child_views["lapsdelta"]._child_views[figure.id];
+    let labsdelta_view = Bokeh.index["tabs"]._child_views["labsdelta"].child_views;
+    let fig_view = labsdelta_view[labsdelta_view.length-1]._child_views[figure.id];
     let hover_view = fig_view.tool_views[hovertool.id];
     let renderer_view = fig_view.renderer_views[renderer.id];
     let xs = renderer_view.xscale.compute(x);
@@ -565,4 +556,4 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
         b.on_click(s)
         btns.append(b)
 
-    return column(row(play, *btns), slider, p0, p1, id='lapsdelta')
+    return column(row(play, *btns), slider, p0, p1)

@@ -1,8 +1,8 @@
 import os
 import numpy as np
 
-from bokeh.models.widgets import Button
-from bokeh.models import Panel, Tabs, ColumnDataSource
+from bokeh.models.widgets import Button, TextInput, TextAreaInput
+from bokeh.models import Panel, Tabs, ColumnDataSource, CustomJS
 from bokeh.plotting import curdoc, figure
 from bokeh.layouts import column, row
 
@@ -73,9 +73,9 @@ tabs.append(Panel(
 
 for ttl in ["LapData", "RPMs", "Wheelspeed", "Over/Understeer", "Susp Trvl"]:
     figs.append(row(figure(plot_height=500, plot_width=800)))
-    tabs.append(Panel(child=figs[-1], title=ttl, name=ttl.split(" ")[0].lower()))
+    tabs.append(Panel(child=figs[-1], title=ttl, id=ttl.split(" ")[0].lower()))
 
-tabs.append(Panel(child=figures.getLapDelta(), title="LapsDelta", name='lapsdeltapanel'))
+tabs.append(Panel(child=figures.getLapDelta(), title="LapsDelta", id='lapsdeltapanel'))
 
 tabs_ = Tabs(tabs=tabs, id='tabs')
 curdoc().add_root(tabs_)
