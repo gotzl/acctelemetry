@@ -73,11 +73,11 @@ tabs.append(Panel(
 
 for ttl in ["LapData", "RPMs", "Wheelspeed", "Over/Understeer", "Susp Trvl"]:
     figs.append(row(figure(plot_height=500, plot_width=800)))
-    tabs.append(Panel(child=figs[-1], title=ttl))
+    tabs.append(Panel(child=figs[-1], title=ttl, name=ttl.split(" ")[0].lower()))
 
-tabs.append(Panel(child=figures.getLapDelta(), title="LapsDelta"))
+tabs.append(Panel(child=figures.getLapDelta(), title="LapsDelta", name='lapsdeltapanel'))
 
-tabs_ = Tabs(tabs=tabs)
+tabs_ = Tabs(tabs=tabs, id='tabs')
 curdoc().add_root(tabs_)
 
 # source.selected = {'0d': {'glyph': None, 'indices': []},

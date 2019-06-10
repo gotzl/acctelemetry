@@ -351,6 +351,7 @@ def getLapDelta():
     mode_select = Select(title="Mode:", value='absolut',
                          options=['absolut',
                                   'gainloss',
+                                  'oversteer',
                                   'speed',
                                   'pedals',
                                   'throttle',
@@ -370,7 +371,8 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     # add required colors to dataframe and create datasource
     color_mode_map = {'absolut': acctelemetry.adddeltacolors,
                 'gainloss': lambda x: acctelemetry.adddeltacolors(x, 'grad'),
-                'g_lon': acctelemetry.addgloncolors,
+                      'g_lon': acctelemetry.addgloncolors,
+                      'oversteer': acctelemetry.addoversteercolors,
                 'speed':acctelemetry.addspeedcolors,
                 'pedals':acctelemetry.addpedalscolors,
                 'throttle':acctelemetry.addpedalscolors,
@@ -460,72 +462,73 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     cr.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
 
 
-    # Update the selection with slider.
-    # Selection changes from slider trigger the display of a label next
-    # to the selected point.
-    slider = Slider(start=0, end=len(ds.data['dist_lap']),value=0, step=50)
-    code = """
-    labels.data = {'x':[],'y':[],'t':[]}
-    if (cb_data && cb_data['index']) {
-        cb_data['index'].indices = [cb_data['index'].indices[0]];
-        source.selected = cb_data['index'];
-    } else {
-        source.selected.indices = [slider.value]
-        labels.data = {'ind':[slider.value],
-                'x':[source.data.dist_lap[slider.value]],
-                'y':[source.data.speedkmh[slider.value]],
-                't':[source.data.speedkmh[slider.value]]}
-    }
-    labels.change.emit()
-    source.change.emit()
-    """
-    labels = ColumnDataSource(data=dict(x=[], y=[], t=[], ind=[]))
-    p0.add_layout(LabelSet(x='x', y='y', text='t', y_offset=10, x_offset=10, source=labels))
-    callback = CustomJS(args=dict(source=ds, labels=labels, slider=slider), code=code)
-
-
-    # A tooltip that shows some information for each point,
-    # synchronized to the track map via the callback
-    hover0 = createHoverTool(['time','dist','speed','dt'])
+    # Toooltips that show some information for each point, triggered via slider.onchange JS
+    hover0 = createHoverTool(['time','dist','speedkmh','dt'])
     # a small hack to show only one tooltip (hover selects multiple points)
     hover0.tooltips[-1] = (hover0.tooltips[-1][0], hover0.tooltips[-1][1]+"""
         <style>
             .bk-tooltip>div:not(:first-child) {display:none;}
         </style>""")
-    hover0.renderers=[c0]
-    hover0.callback = callback
-    hover0.point_policy='snap_to_data'
+    hover0.renderers = [r0]
     hover0.mode = 'vline'
-    p0.add_tools(hover0)
+    hover0.line_policy='interp'
 
-    # A tooltip that shows some information for each point,
-    # synchronized to the track map via the callback
-    hover = createHoverTool(['time','dist','speed','dt'])
-    hover.tooltips = hover0.tooltips
-    hover.renderers=[c1]
-    hover.callback = callback
-    hover.point_policy='snap_to_data'
-    p1.add_tools(hover)
+    # hover1 = createHoverTool(['time','dist','speedkmh','dt'])
+    # hover1.tooltips = hover0.tooltips
+    # hover1.renderers = [c1]
+    # hover1.mode = 'mouse'
+
+    # Enable selection update with slider
+    slider = Slider(start=0, end=len(ds.data['dist_lap']),value=0, step=50)
+
+    # Hovertools, that emit a selection change by modifying the slider value
+    callback = CustomJS(args=dict(slider=slider), code=
+    """
+    let val = cb_data['index'].indices[0]
+    if (val!=0 && !isNaN(val))
+        slider.value = cb_data['index'].indices[0];
+    """)
+    p0.add_tools(HoverTool(tooltips=None, renderers=[c0],
+                           callback=callback,
+                           line_policy='interp', mode='vline'))
+    p1.add_tools(HoverTool(tooltips=None, renderers=[c1],
+                           callback=callback,
+                           line_policy='interp', mode='mouse', point_policy='snap_to_data'))
+
+    p0.add_tools(hover0)
+    # p1.add_tools(hover1)
+
+    # React on changes of the selection in the datasource. Display tooltips at the position of the selected point.
+    code = """
+    console.log(figure.id+" "+hovertool.id+" "+renderer.id);
+    let ind = slider.value;
+    let x = source.data.dist_lap[ind];
+    let y = source.data.speedkmh[ind];
+    let fig_view = Bokeh.index["tabs"].child_views[6].child_views[4]._child_views["lapsdelta"]._child_views[figure.id];
+    let hover_view = fig_view.tool_views[hovertool.id];
+    let renderer_view = fig_view.renderer_views[renderer.id];
+    let xs = renderer_view.xscale.compute(x);
+    let ys = renderer_view.yscale.compute(y);
+    hover_view._inspect(xs, ys);
+    source.selected.indices = [ind]; // this triggers c0/c1/cr selected glyph
+    """
+    callback = CustomJS(args=dict(hovertool=hover0,
+                                  source=ds,
+                                  figure=p0,
+                                  slider=slider,
+                                  renderer=r0), code=code)
+    slider.js_on_change('value', callback)
 
 
     #### create a player that iterates over the data
     def increment(stepsize, direction=1):
-        idxs = ds.selected.indices
-        if idxs is None or \
-                len(idxs)==0 or \
-                idxs[0] is None:
-            i = 0
-        else:
-            i = idxs[0] + direction*stepsize
-
+        i = slider.value + direction*stepsize
         if i<0: i = 0
         if i>len(ds.data['dist']): i = len(ds.data['dist'])-1
-        # set the slider value, this will in turn trigger the
-        # update of the selected item in the ds
-        if slider.value == i:
-            ds.selected = Selection(indices=[i])
-            ds.trigger('data', ds.data, ds.data)
-        else: slider.value = i
+        # update of the selected item in the ds by modifying the slider value
+        slider.value = i
+        slider.trigger('value', slider.value, i)
+
 
     def cbcrl(stop=False):
         global cb
@@ -533,23 +536,14 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
         if cb is None and not stop:
             cb = curdoc().add_periodic_callback(lambda: increment(5), 5*50)
             # reset hovertool
-            hover0.renderers = []
-            hover.renderers = []
+            # hover0.renderers = []
+            # hover.renderers = []
             play.label = "Pause"
         else:
             try:  curdoc().remove_periodic_callback(cb)
             except: pass
             cb = None
             play.label = "Play"
-            if stop:
-                # reset hovertool and selection
-                ds.selected = Selection(indices=[])
-                ds.trigger('data', ds.data, ds.data)
-                hover0.renderers = [c0]
-                hover.renderers = [c1]
-
-    def stopcb():
-        cbcrl(stop=True)
 
     global cb
     if not 'cb' in globals():
@@ -561,9 +555,6 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     play = Button(label="Play")
     play.on_click(cbcrl)
 
-    stop = Button(label="Stop")
-    stop.on_click(stopcb)
-
     btns = []
     def bb(): increment(50, -1)
     def b(): increment(5, -1)
@@ -574,5 +565,4 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
         b.on_click(s)
         btns.append(b)
 
-    slider.js_on_change('value', callback)
-    return column(row(play, stop, *btns), slider, p0, p1)
+    return column(row(play, *btns), slider, p0, p1, id='lapsdelta')

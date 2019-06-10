@@ -118,8 +118,8 @@ def createDataFrame(file_, channs, laps_times, laps_limits):
     oversteer  = np.sign(df.g_lat) * (neutral_steering-steering_corr)
     understeer = oversteer.copy()
 
-    indices = oversteer < 0
-    oversteer[indices] = 0
+    # indices = oversteer < 0
+    # oversteer[indices] = 0
 
     indices = understeer > 0
     understeer[indices] = 0
@@ -172,7 +172,7 @@ def lapdelta(df, reference, target):
 
     # for each track position in a with time ta
     # - find track position in b, interpolate
-    dt_, speed, speedkmh, throttle, brake, g_lon, xr, yr = [],[],[],[],[],[],[],[]
+    dt_, speed, speedkmh, throttle, brake, g_lon, xr, yr, oversteer = [],[],[],[],[],[],[],[],[]
     a_idx,b_idx = 0,0
     for idx in range(len(df_a)):
         # the b_idx closest to current track position in a
@@ -190,13 +190,13 @@ def lapdelta(df, reference, target):
         dt_.append(df_a.time_lap.values[idx] - (df_b.time_lap.values[b_idx]+dt))
         xr.append(df_a.x.values[a_idx])
         yr.append(df_a.y.values[a_idx])
-        for i in ['speed', 'speedkmh', 'throttle', 'brake', 'g_lon']:
+        for i in ['speed', 'speedkmh', 'throttle', 'brake', 'g_lon', 'oversteer']:
             eval(i).append(df_b[i].values[b_idx])
 
     df_a = df_a.assign(dt=pd.Series(dt_).values)
     df_a = df_a.assign(xr=pd.Series(xr).values)
     df_a = df_a.assign(yr=pd.Series(yr).values)
-    for i in ['speed', 'speedkmh', 'throttle', 'brake', 'g_lon']:
+    for i in ['speed', 'speedkmh', 'throttle', 'brake', 'g_lon', 'oversteer']:
         df_a = df_a.assign(**{'%s_r'%i:pd.Series(eval(i)).values})
 
     return df_a, df_b
@@ -267,6 +267,18 @@ def addgloncolors(df, ref=False):
     r_ = g_lon[(g_lon<0)].abs().map(lambda x:cmapr.to_rgba(x/m1))
 
     return df.assign(**{'color_%s'%g:pd.concat([g_,r_])})
+
+
+def addoversteercolors(df, ref=False):
+    o = 'oversteer'
+    if ref: o += '_r'
+
+    oversteer = df[o].rolling(10, min_periods=1).mean()
+    m0,m1 = oversteer.max(),abs(oversteer.min())
+    r_ = oversteer[(oversteer>=0)].map(lambda x:cmapr.to_rgba(x/m0))
+    b_ = oversteer[(oversteer<0)].abs().map(lambda x:cmapb.to_rgba(x/m1))
+
+    return df.assign(**{'color_%s'%o:pd.concat([b_,r_])})
 
 
 def addspeedcolors(df, ref=False):
