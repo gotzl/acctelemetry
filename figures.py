@@ -302,26 +302,23 @@ def getLapDelta():
 
             # if track is not None and head_.descr1!=track: continue
 
-            laps = acctelemetry.laps(f_)
+            laps = np.array(acctelemetry.laps(f_))
             laps_limits = acctelemetry.laps_limits(laps, chans[4].freq, len(chans[4].data))
-
-            laps = np.array(laps)
-            laps_times = [laps[0]]
-            laps_times.extend(list(laps[1:]-laps[:-1]))
+            laps_times = acctelemetry.laps_times(laps)
 
             # create pandas DataFrame
             df_ = acctelemetry.createDataFrame(
-                name, chans, laps_times, laps_limits)
+                name, chans, laps_times, laps_limits, acc=head_.event!='AC_LIVE')
             # restrict to selected lap
             lap = int(filter_source.data['lap'][idx])
             df_ = df_[df_.lap==lap]
 
 
-            info = [name, lap, head_.descr2, laps_times[lap]]
+            info = [name, lap, head_.vehicle, laps_times[lap]]
             if df is None:
                 df = df_
                 reference = info
-                track = head_.descr1
+                track = head_.venue
             else:
                 df = df.append(df_)
                 target = info
@@ -360,64 +357,39 @@ def getLapDelta():
     return layout
 
 
-def getLapDeltaFigure(df, reference, target, mode='absolut'):
-    df_, df_r = acctelemetry.lapdelta(df, reference, target)
+color_mode_map = {'absolut': acctelemetry.adddeltacolors,
+                  'gainloss': lambda x,_: acctelemetry.adddeltacolors(x, 'grad'),
+                  'g_lon': acctelemetry.addgloncolors,
+                  'oversteer': acctelemetry.addoversteercolors,
+                  'speed':acctelemetry.addspeedcolors,
+                  'pedals':acctelemetry.addpedalscolors,
+                  'throttle':acctelemetry.addpedalscolors,
+                  'brake':acctelemetry.addpedalscolors,
+                  }
 
+
+def getLapFigure(p1, df_, ds, mode, ref=False, hasref=False):
     # add required colors to dataframe and create datasource
-    color_mode_map = {'absolut': acctelemetry.adddeltacolors,
-                      'gainloss': lambda x: acctelemetry.adddeltacolors(x, 'grad'),
-                      'g_lon': acctelemetry.addgloncolors,
-                      'oversteer': acctelemetry.addoversteercolors,
-                      'speed':acctelemetry.addspeedcolors,
-                      'pedals':acctelemetry.addpedalscolors,
-                      'throttle':acctelemetry.addpedalscolors,
-                      'brake':acctelemetry.addpedalscolors,
-                }
-    df_ = color_mode_map[mode](df_)
-
-    ds = ColumnDataSource(df_)
+    df_ = color_mode_map[mode](df_, ref)
 
     to_bokeh = lambda c: list(map(mplcolors.to_hex, c))
-    ds.data['color'] = to_bokeh(df_['color_%s'%mode])
-    if mode not in ['absolut', 'gainloss']:
-        df_ = color_mode_map[mode](df_, ref=True)
-        ds.data['color_r'] = to_bokeh(df_['color_%s_r'%mode])
 
+    x = 'xr' if ref else 'x'
+    y = 'yr' if ref else 'y'
+    color = 'color_%s'%((mode+'_r') if ref else mode)
+    ds.data[color] = to_bokeh(df_[color])
 
-    p0 = figure(plot_height=400, plot_width=800,
-                tools="crosshair,pan,reset,save,wheel_zoom")
+    # shift the reference points to the outside
+    if ref:
+        ds.data[x] += 30*np.cos(df_.heading+np.pi/2)
+        ds.data[y] += 30*np.sin(df_.heading+np.pi/2)
 
-    colors = itertools.cycle(palette)
-    c0,c1 = next(colors),next(colors)
-
-    # create the velo vs dist plot
-    r0 = p0.line(x='dist_lap', y='speedkmh', source=ds, color=c0, line_width=2)
-    # overwrite the (non)selection glyphs with the base line style
-    # the style for the hover will be set below
-    nonselected_ = Line(line_alpha=1, line_color=c0, line_width=2)
-    r0.selection_glyph = nonselected_
-    r0.nonselection_glyph = nonselected_
-
-    # create the dt vs dist plot with extra y axis, set the (non)selection glyphs
-    lim = max(df_.dt.abs())
-    lim += lim*.2
-    p0.extra_y_ranges = {"dt": Range1d(start=-lim, end=lim)}
-    p0.add_layout(LinearAxis(
-        y_range_name='dt',
-        axis_label='dt [s]'), 'right')
-    r1 = p0.line(x='dist_lap', y='dt', source=ds, y_range_name='dt', color=c1, line_width=2)
-    r1.selection_glyph = Line(line_alpha=1, line_color='red', line_width=5)
-    r1.nonselection_glyph = Line(line_alpha=1, line_color=c1, line_width=2)
-
-    # create reference velo vs dist plot
-    p0.line(df_r.dist_lap, df_r.speedkmh, color=next(colors), line_width=2)
-
-    # create second figure for track map
-    p1 = figure(plot_height=400, plot_width=800, tools="crosshair,pan,reset,save,wheel_zoom")
     # plot the track map, overwrite the (non)selection glyph to keep our color from ds
     # the hover effect is configured below
-    r2 = p1.scatter(x='x', y='y', source=ds, color='color')
+    r2 = p1.scatter(x=x, y=y, source=ds, color=color)
     r2.nonselection_glyph = r2.selection_glyph
+
+    if ref: return p1
 
     # add some lap descriptions
     corners = acctelemetry.corners(df_)
@@ -431,63 +403,27 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
                       source=corners_ds, render_mode='canvas')
     p1.add_layout(labels)
 
-    # calculate points for the reference map drawn 'outside' of the other track map
-    if mode not in ['absolut', 'gainloss']:
-        ds.data['xr'] = df_.xr+30*np.cos(df_.heading+np.pi/2)
-        ds.data['yr'] = df_.yr+30*np.sin(df_.heading+np.pi/2)
-        r3 = p1.scatter(x='xr', y='yr', source=ds, color='color')
-        r3.nonselection_glyph = r3.selection_glyph
-
-    # create a invisible renderer for velo vs dist
-    # this is used to trigger the hover, thus the size is large
-    c0 = p0.circle(x='dist_lap', y='speedkmh', source=ds, size=10, fill_alpha=0.0, alpha=0.0)
-    c0.selection_glyph = Circle(fill_color='red', fill_alpha=1., line_color=None)
-    c0.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
-
     # create a invisible renderer for the track map
     # this is used to trigger the hover, thus the size is large
     c1 = p1.circle(x='x', y='y', source=ds, size=10, fill_alpha=0.0, alpha=0.0)
     c1.selection_glyph = Circle(fill_color='red', fill_alpha=.7, line_color=None)
     c1.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
 
-    cr = p1.circle(x='xr', y='yr', source=ds,
-                   size = 8 if mode in ['absolut', 'gainloss'] else 10,
-                   fill_alpha=0.0, alpha=0.0)
-    cr.selection_glyph = Circle(fill_color='blue', fill_alpha=.7, line_color=None)
-    cr.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
+
+    # create a renderer to show a dot for the reference
+    if hasref:
+        cr = p1.circle(x='xr', y='yr', source=ds,
+                       size = 8 if mode in ['absolut', 'gainloss'] else 10,
+                       fill_alpha=0.0, alpha=0.0)
+        cr.selection_glyph = Circle(fill_color='blue', fill_alpha=.7, line_color=None)
+        cr.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
+
+    return c1
 
 
-    # Toooltips that show some information for each point, triggered via slider.onchange JS
-    hover0 = createHoverTool(['time','dist','speedkmh','dt'])
-    # a small hack to show only one tooltip (hover selects multiple points)
-    hover0.tooltips[-1] = (hover0.tooltips[-1][0], hover0.tooltips[-1][1]+"""
-        <style>
-            .bk-tooltip>div:not(:first-child) {display:none;}
-        </style>""")
-    hover0.renderers = [r0]
-    hover0.mode = 'vline'
-    hover0.line_policy='interp'
-
-
+def getLapSlider(ds, p0, r0, hover0):
     # Enable selection update with slider
     slider = Slider(start=0, end=len(ds.data['dist_lap']),value=0, step=50)
-
-    # Hovertools, that emit a selection change by modifying the slider value
-    callback = CustomJS(args=dict(slider=slider), code=
-    """
-    let val = cb_data['index'].indices[0]
-    if (val!=0 && !isNaN(val))
-        slider.value = cb_data['index'].indices[0];
-    """)
-    p0.add_tools(HoverTool(tooltips=None, renderers=[c0],
-                           callback=callback,
-                           line_policy='interp', mode='vline'))
-    p1.add_tools(HoverTool(tooltips=None, renderers=[c1],
-                           callback=callback,
-                           line_policy='interp', mode='mouse', point_policy='snap_to_data'))
-
-    p0.add_tools(hover0)
-    # p1.add_tools(hover1)
 
     # React on changes of the selection in the datasource. Display tooltips at the position of the selected point.
     code = """
@@ -509,7 +445,10 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
                                   slider=slider,
                                   renderer=r0), code=code)
     slider.js_on_change('value', callback)
+    return slider
 
+
+def getLapControls(ds, slider):
 
     #### create a player that iterates over the data
     def increment(stepsize, direction=1):
@@ -556,4 +495,99 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
         b.on_click(s)
         btns.append(b)
 
-    return column(row(play, *btns), slider, p0, p1)
+    return row(play, *btns)
+
+
+def getLapDeltaFigure(df, reference, target, mode='absolut'):
+    df_, df_r = acctelemetry.lapdelta(df, reference, target)
+
+    ds = ColumnDataSource(df_)
+    p0 = figure(plot_height=400, plot_width=800,
+                tools="crosshair,pan,reset,save,wheel_zoom")
+
+    colors = itertools.cycle(palette)
+    col0,col1 = next(colors),next(colors)
+
+    # create the velo vs dist plot
+    r0 = p0.line(x='dist_lap', y='speedkmh', source=ds, color=col0, line_width=2)
+    # overwrite the (non)selection glyphs with the base line style
+    # the style for the hover will be set below
+    nonselected_ = Line(line_alpha=1, line_color=col0, line_width=2)
+    r0.selection_glyph = nonselected_
+    r0.nonselection_glyph = nonselected_
+
+    # create the dt vs dist plot with extra y axis, set the (non)selection glyphs
+    lim = max(df_.dt.abs())
+    lim += lim*.2
+    p0.extra_y_ranges = {"dt": Range1d(start=-lim, end=lim)}
+    p0.add_layout(LinearAxis(
+        y_range_name='dt',
+        axis_label='dt [s]'), 'right')
+    r1 = p0.line(x='dist_lap', y='dt', source=ds, y_range_name='dt', color=col1, line_width=2)
+    r1.selection_glyph = Line(line_alpha=1, line_color='red', line_width=5)
+    r1.nonselection_glyph = Line(line_alpha=1, line_color=col1, line_width=2)
+
+    # create reference velo vs dist plot
+    p0.line(df_r.dist_lap, df_r.speedkmh, color=next(colors), line_width=2)
+
+    # create an invisible renderer for velo vs dist
+    # this is used to trigger the hover, thus the size is large
+    c0 = p0.circle(x='dist_lap', y='speedkmh', source=ds, size=10, fill_alpha=0.0, alpha=0.0)
+    c0.selection_glyph = Circle(fill_color='red', fill_alpha=1., line_color=None)
+    c0.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
+
+
+    # create figure for track map
+    p1 = figure(plot_height=400, plot_width=800, tools="crosshair,pan,reset,save,wheel_zoom")
+
+    # add some lap tangents to guide the eye when comparing map and refmap
+    if mode not in ['absolut', 'gainloss']:
+        x0 = df_.x.values
+        y0 = df_.y.values
+        h = df_.heading.values
+        x1 = x0 + 30*np.cos(h+np.pi/2)
+        y1 = y0 + 30*np.sin(h+np.pi/2)
+        p1.segment(x0=x0, y0=y0, x1=x1, y1=y1, color="#F4A582", line_width=1)
+
+    # create map of the track
+    c1 = getLapFigure(p1, df_, ds, mode, hasref=True)
+
+    # calculate points for the reference map drawn 'outside' of the other track map
+    if mode not in ['absolut', 'gainloss']:
+        getLapFigure(p1, df_, ds , mode, ref=True)
+
+
+    # Toooltips that show some information for each point, triggered via slider.onchange JS
+    hover0 = createHoverTool(['time','dist','speedkmh','dt'])
+    # a small hack to show only one tooltip (hover selects multiple points)
+    hover0.tooltips[-1] = (hover0.tooltips[-1][0], hover0.tooltips[-1][1]+"""
+        <style>
+            .bk-tooltip>div:not(:first-child) {display:none;}
+        </style>""")
+    hover0.renderers = [r0]
+    hover0.mode = 'vline'
+    hover0.line_policy='interp'
+
+
+    # selection change via button and slider. Tooltips 'hover0' will be rendered in 'p0' using rederer 'r0'
+    slider = getLapSlider(ds, p0, r0, hover0)
+    btns = getLapControls(ds, slider)
+
+    # Hovertools, that emit a selection change by modifying the slider value
+    callback = CustomJS(args=dict(slider=slider), code=
+    """
+    let val = cb_data['index'].indices[0]
+    if (val!=0 && !isNaN(val))
+        slider.value = cb_data['index'].indices[0];
+    """)
+    p0.add_tools(HoverTool(tooltips=None, renderers=[c0],
+                           callback=callback,
+                           line_policy='interp', mode='vline'))
+    p1.add_tools(HoverTool(tooltips=None, renderers=[c1],
+                           callback=callback,
+                           line_policy='interp', mode='mouse', point_policy='snap_to_data'))
+
+    p0.add_tools(hover0)
+    # p1.add_tools(hover1)
+
+    return column(btns, slider, p0, p1)

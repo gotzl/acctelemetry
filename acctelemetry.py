@@ -29,20 +29,70 @@ def laps(f):
 def laps_limits(laps, freq, n):
     """find the start/end indizes of the data for each lap
     """
-    laps_limits = list([0])
+    laps_limits = []
+    if laps[0]!=0:
+        laps_limits = [0]
     laps_limits.extend((np.array(laps)*freq).astype(int))
     laps_limits.extend([n])
     return list(zip(laps_limits[:-1], laps_limits[1:]))
 
 
-def createDataFrame(file_, channs, laps_times, laps_limits):
+def laps_times(laps):
+    """calculate the laptime for each lap"""
+    laps_times = []
+    if len(laps)==0: return laps_times
+    if laps[0]==0:  laps_times = [laps[0]]
+    laps_times.extend(list(laps[1:]-laps[:-1]))
+    return laps_times
+
+
+def createDataFrame(file_, channs, laps_times, laps_limits, acc=True):
     # convert some of the data from ld file to integer
-    channs[7].data = list(map(int, channs[7].data))
-    channs[11].data = list(map(int, channs[11].data))
-    channs[12].data = list(map(int, channs[12].data))
+    if acc:
+        channs[7].data = list(map(int, channs[7].data))
+        channs[11].data = list(map(int, channs[11].data))
+        channs[12].data = list(map(int, channs[12].data))
+
+    chan_name = lambda x:x.name.lower()
+    if not acc:
+        channs[62].data = list(map(int, channs[62].data))
+        ac_chan_map = {
+            'ABS Active': 'abs',
+            'Brake Pos': 'brake',
+            'Brake Temp FL':'brake_temp_lf',
+            'Brake Temp FR':'brake_temp_rf',
+            'Brake Temp RL':'brake_temp_lr',
+            'Brake Temp RR':'brake_temp_rr',
+            'CG Accel Lateral':'g_lat',
+            'CG Accel Longitudinal':'g_lon',
+            'Engine RPM':'rpms',
+            'Gear': 'gear',
+            'Ground Speed':'speedkmh',
+            'Steering Angle':'steerangle',
+            'Suspension Travel FL':'sus_travel_lf',
+            'Suspension Travel FR':'sus_travel_rf',
+            'Suspension Travel RL':'sus_travel_lr',
+            'Suspension Travel RR':'sus_travel_rr',
+            'TC Active':'tc',
+            'Throttle Pos':'throttle',
+            'Wheel Angular Speed FL':'wheel_speed_lf',
+            'Wheel Angular Speed FR':'wheel_speed_rf',
+            'Wheel Angular Speed RL':'wheel_speed_lr',
+            'Wheel Angular Speed RR':'wheel_speed_rr',
+        }
+        chan_name = lambda x: ac_chan_map[x.name] \
+            if x.name in ac_chan_map \
+            else x.name.lower()
 
     # create a data frame with the data from the ld file
-    df = pd.DataFrame({i.name.lower(): i.data for i in channs[1:]})
+    df = pd.DataFrame({chan_name(i): i.data for i in channs[(1 if acc else 0):]})
+
+    if acc:
+        df = pd.concat([df, pd.DataFrame(
+            {'speedkmh':df.speed*3.6})], axis=1)
+    else:
+        df = pd.concat([df, pd.DataFrame(
+            {'speed':df.speedkmh/3.6})], axis=1)
 
     # create list with the total distance
     ds = (df.speed / channs[4].freq)
@@ -75,7 +125,6 @@ def createDataFrame(file_, channs, laps_times, laps_limits):
     df = pd.concat([df, pd.DataFrame(
         {'file':file_,'lap':l,
          'g_sum': df.g_lon.abs()+df.g_lat.abs(),
-         'speedkmh':df.speed*3.6,
          'alpha':alpha, 'heading':heading,
          'dx':dx, 'dy':dy,'ds':ds,
          'dist':s,'dist_lap':sl,
@@ -87,7 +136,8 @@ def createDataFrame(file_, channs, laps_times, laps_limits):
     df_ = df[(df.lap==fastest+1)]
     fac = 1.
     dist = None
-    while True:
+    n = 0
+    while n<1000:
         dx = df_.ds * np.cos(df_.heading*fac)
         dy = df_.ds * np.sin(df_.heading*fac)
         end = (dx.cumsum()).values[-1],(dy.cumsum()).values[-1]
@@ -97,6 +147,8 @@ def createDataFrame(file_, channs, laps_times, laps_limits):
         if dist is not None and newdist>dist: break
         dist = newdist
         fac -= 0.0001
+        n +=1
+    if n==1000: fac = 1.
 
     # recalculate with correction
     df.alpha = df.alpha*fac
@@ -346,14 +398,14 @@ def scanFiles(files):
     for f in files:
         if not os.path.isfile(os.path.splitext(f)[0]+".ldx"): continue
         head = ldparser.ldhead(f)
-        laps_ = laps(f)
+        laps_ = laps_times(np.array(laps(f)))
         for i, lap in enumerate(laps_):
-            if i>0: lap -= laps_[i-1]
             data.append((os.path.basename(f),
                          head.datetime.strftime("%Y-%m-%d %H:%M:%S"),
-                         head.descr1, head.descr2, i,
+                         head.venue, head.vehicle if head.vehicle else head.descr, i,
                          "%i:%02i.%03i"%(lap//60,lap%60,(lap*1e3)%1000),
-                        ))
+                         head.name,
+                         ))
 
     if len(data)==0:
         return dict()
@@ -366,6 +418,7 @@ def scanFiles(files):
         car=data[:,3],
         lap=data[:,4],
         time=data[:,5],
+        driver=data[:,6]
     )
 
 

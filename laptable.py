@@ -7,6 +7,7 @@ def create():
     columns = [
         TableColumn(field="name", title="File name"),
         TableColumn(field="datetime", title="Datetime"),
+        TableColumn(field="driver", title="Driver"),
         TableColumn(field="track", title="Track"),
         TableColumn(field="car", title="Car"),
         TableColumn(field="lap", title="Lap"),

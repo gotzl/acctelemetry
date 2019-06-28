@@ -1,8 +1,8 @@
 import os
 import numpy as np
 
-from bokeh.models.widgets import Button, TextInput, TextAreaInput
-from bokeh.models import Panel, Tabs, ColumnDataSource, CustomJS
+from bokeh.models.widgets import Button
+from bokeh.models import Panel, Tabs, ColumnDataSource
 from bokeh.plotting import curdoc, figure
 from bokeh.layouts import column, row
 
@@ -23,16 +23,15 @@ def callback():
         f_ = os.environ['TELEMETRY_FOLDER']+'/%s'%filter_source.data['name'][idx]
         head_, chans = ldparser.read_ldfile(f_)
 
-        laps = acctelemetry.laps(f_)
+        laps = np.array(acctelemetry.laps(f_))
         laps_limits = acctelemetry.laps_limits(laps, chans[4].freq, len(chans[4].data))
-
-        laps = np.array(laps)
-        laps_times = [laps[0]]
-        laps_times.extend(list(laps[1:]-laps[:-1]))
+        laps_times = acctelemetry.laps_times(laps)
 
         # create pandas DataFrame
         df_ = acctelemetry.createDataFrame(
-            filter_source.data['name'][idx], chans, laps_times, laps_limits)
+            filter_source.data['name'][idx], chans, laps_times, laps_limits,
+            acc=head_.event!='AC_LIVE'
+        )
         # restrict to selected lap
         lap = int(filter_source.data['lap'][idx])
         df_ = df_[df_.lap==lap]
