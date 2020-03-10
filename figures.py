@@ -121,9 +121,9 @@ def getFigure(sources, x='dist_lap', width=800):
         h_ = HoverTool(
             tooltips=tool if len(h)==0 else tools[0]+tool,
             formatters={
-                'dist' : 'printf',
-                'dist_lap' : 'printf',
-                'time_lap' : 'printf',
+                'dist': 'printf',
+                'dist_lap': 'printf',
+                'time_lap': 'printf',
             },
             mode='mouse' if len(y)>1 or len(sources)>1 else 'vline')
 
@@ -249,8 +249,16 @@ def getSuspFigure(df):
             'sus_travel_rf', 'sus_travel_rr']
     tools = ['time', 'dist']+vars
     return getSimpleFigure(df, vars, tools,
-                           {"sus": Range1d(start=-10, end=120)})
+                           {"sus_travel": Range1d(start=-10, end=120)})
 
+def getBrakeTempFigure(df):
+    vars = ['brake_temp_lf','brake_temp_lr',
+            'brake_temp_rf', 'brake_temp_rr',
+            'throttle','brake']
+    tools = ['time', 'dist', 'speed']+vars
+    return getSimpleFigure(df, vars+['tc', 'abs'], tools,
+                           {"pedals": Range1d(start=-20, end=400), "tcabs": Range1d(start=-1, end=20)},
+                           {"pedals":['throttle','brake'], "tcabs":['tc', 'abs']})
 
 def getWheelSpeedFigure(df):
     vars = ['wheel_speed_lf','wheel_speed_lr',
@@ -261,6 +269,21 @@ def getWheelSpeedFigure(df):
                            {"pedals": Range1d(start=-20, end=400), "tcabs": Range1d(start=-1, end=20)},
                            {"pedals":['throttle','brake'], "tcabs":['tc', 'abs']})
 
+def getTyreTairFigure(df):
+    vars = ['tyre_tair_lf','tyre_tair_lr',
+            'tyre_tair_rf', 'tyre_tair_rr',
+            'throttle','brake']
+    tools = ['time', 'dist', 'speed']+vars
+    return getSimpleFigure(df, vars+['tc', 'abs'], tools,
+                           {"pedals": Range1d(start=-20, end=400), "tcabs": Range1d(start=-1, end=20)},
+                           {"pedals":['throttle','brake'], "tcabs":['tc', 'abs']})
+
+def getTyrePreassureFigure(df):
+    vars = ['speedkmh', 'tyre_press_lf','tyre_press_lr',
+            'tyre_press_rf', 'tyre_press_rr']
+    tools = ['time', 'dist']+vars
+    return getSimpleFigure(df, vars, tools,
+                           {"tyre_press": Range1d(start=26, end=32)})
 
 def getOversteerFigure(df):
     vars = ['speedkmh','oversteer','understeer']#,'steering_corr','neutral_steering']
@@ -297,7 +320,7 @@ def getLapDelta():
         df, track, reference, target = None, None, None, None
         for idx in idxs:
             name = filter_source.data['name'][idx]
-            f_ = os.environ['TELEMETRY_FOLDER']+'/%s'%name
+            f_ = os.path.join(os.environ['TELEMETRY_FOLDER'].strip("'"), name)
             head_, chans = ldparser.read_ldfile(f_)
 
             # if track is not None and head_.descr1!=track: continue
@@ -306,33 +329,31 @@ def getLapDelta():
             laps_limits = acctelemetry.laps_limits(laps, chans[4].freq, len(chans[4].data))
             laps_times = acctelemetry.laps_times(laps)
 
-            # create pandas DataFrame
-            df_ = acctelemetry.createDataFrame(
-                name, chans, laps_times, laps_limits, acc=head_.event!='AC_LIVE')
+            # create DataStore that is used later to get pandas DataFrame
+            ds = acctelemetry.DataStore(
+                chans, laps_times, laps_limits, acc=head_.event!='AC_LIVE')
             # restrict to selected lap
             lap = int(filter_source.data['lap'][idx])
-            df_ = df_[df_.lap==lap]
 
-
-            info = [name, lap, head_.vehicle, laps_times[lap]]
-            if df is None:
-                df = df_
+            info = [ds, lap, head_.vehicle, laps_times[lap]]
+            if track is None:
+                # df = df_
                 reference = info
                 track = head_.venue
             else:
-                df = df.append(df_)
+                # df = df.append(df_)
                 target = info
 
         if reference is None or target is None:
             layout.children[-1] = tmp
             return
 
-        text_input.value = "%s: reference: %s (%i) | target: %s (%i)"%(track, reference,idxs[0],target,idxs[-1])
+        # text_input.value = "%s: reference: %s (%i) | target: %s (%i)"%(track, reference, idxs[0], target, idxs[-1])
         text_input.value = "%s | %s: reference: %s / %.3f (%i) | target: %s / %.3f (%i)"%\
                            (track, mode, reference[2], reference[3], idxs[0],
                             target[2], target[3], idxs[-1])
 
-        layout.children[-1] = getLapDeltaFigure(df, reference[:2], target[:2], mode)
+        layout.children[-1] = getTrackMap(target[:2], reference[:2], mode)
 
     def mode_change(attrname, old, new):
         callback(new)
@@ -353,7 +374,7 @@ def getLapDelta():
 
     filter_source.selected.on_change('indices', callback_)
     tmp = figure(plot_height=500, plot_width=800)
-    layout = column(filters,data_table,mode_select,text_input,tmp, id='labsdelta')
+    layout = column(filters, data_table, mode_select, text_input, tmp, id='lapsdelta')
     return layout
 
 
@@ -409,7 +430,6 @@ def getLapFigure(p1, df_, ds, mode, ref=False, hasref=False):
     c1.selection_glyph = Circle(fill_color='red', fill_alpha=.7, line_color=None)
     c1.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
 
-
     # create a renderer to show a dot for the reference
     if hasref:
         cr = p1.circle(x='xr', y='yr', source=ds,
@@ -421,7 +441,7 @@ def getLapFigure(p1, df_, ds, mode, ref=False, hasref=False):
     return c1
 
 
-def getLapSlider(ds, p0, r0, hover0):
+def getLapSlider(ds, p0, r0, hover0, view):
     # Enable selection update with slider
     slider = Slider(start=0, end=len(ds.data['dist_lap']),value=0, step=50)
 
@@ -430,8 +450,17 @@ def getLapSlider(ds, p0, r0, hover0):
     let ind = slider.value;
     let x = source.data.dist_lap[ind];
     let y = source.data.speedkmh[ind];
-    let labsdelta_view = Bokeh.index["tabs"]._child_views["labsdelta"].child_views;
-    let fig_view = labsdelta_view[labsdelta_view.length-1]._child_views[figure.id];
+    let fig_view;
+    if (view == "trackmap") 
+        fig_view = Bokeh.index["tabs"]
+            ._child_views[view]
+            .child_views[0]
+            .child_views[1]
+            ._child_views[figure.id];
+    if (view == "lapsdelta") {
+        var lapsdelta_view = Bokeh.index["tabs"]._child_views[view].child_views;
+        fig_view = lapsdelta_view[lapsdelta_view.length-1]._child_views[figure.id];
+    }
     let hover_view = fig_view.tool_views[hovertool.id];
     let renderer_view = fig_view.renderer_views[renderer.id];
     let xs = renderer_view.xscale.compute(x);
@@ -442,6 +471,7 @@ def getLapSlider(ds, p0, r0, hover0):
     callback = CustomJS(args=dict(hovertool=hover0,
                                   source=ds,
                                   figure=p0,
+                                  view=view,
                                   slider=slider,
                                   renderer=r0), code=code)
     slider.js_on_change('value', callback)
@@ -498,37 +528,42 @@ def getLapControls(ds, slider):
     return row(play, *btns)
 
 
-def getLapDeltaFigure(df, reference, target, mode='absolut'):
-    df_, df_r = acctelemetry.lapdelta(df, reference, target)
+def getTrackMap(target, reference=None, mode='speed', view='lapsdelta'):
+    if reference is None:
+        df_, df_r = target, None
+    else:
+        df_, df_r = acctelemetry.lapdelta(reference, target)
 
     ds = ColumnDataSource(df_)
     p0 = figure(plot_height=400, plot_width=800,
                 tools="crosshair,pan,reset,save,wheel_zoom")
 
     colors = itertools.cycle(palette)
-    col0,col1 = next(colors),next(colors)
+    col0, col1 = next(colors), next(colors)
 
     # create the velo vs dist plot
     r0 = p0.line(x='dist_lap', y='speedkmh', source=ds, color=col0, line_width=2)
+
     # overwrite the (non)selection glyphs with the base line style
     # the style for the hover will be set below
     nonselected_ = Line(line_alpha=1, line_color=col0, line_width=2)
     r0.selection_glyph = nonselected_
     r0.nonselection_glyph = nonselected_
 
-    # create the dt vs dist plot with extra y axis, set the (non)selection glyphs
-    lim = max(df_.dt.abs())
-    lim += lim*.2
-    p0.extra_y_ranges = {"dt": Range1d(start=-lim, end=lim)}
-    p0.add_layout(LinearAxis(
-        y_range_name='dt',
-        axis_label='dt [s]'), 'right')
-    r1 = p0.line(x='dist_lap', y='dt', source=ds, y_range_name='dt', color=col1, line_width=2)
-    r1.selection_glyph = Line(line_alpha=1, line_color='red', line_width=5)
-    r1.nonselection_glyph = Line(line_alpha=1, line_color=col1, line_width=2)
+    if reference is not None:
+        # create the dt vs dist plot with extra y axis, set the (non)selection glyphs
+        lim = max(df_.dt.abs())
+        lim += lim*.2
+        p0.extra_y_ranges = {"dt": Range1d(start=-lim, end=lim)}
+        p0.add_layout(LinearAxis(
+            y_range_name='dt',
+            axis_label='dt [s]'), 'right')
+        r1 = p0.line(x='dist_lap', y='dt', source=ds, y_range_name='dt', color=col1, line_width=2)
+        r1.selection_glyph = Line(line_alpha=1, line_color='red', line_width=5)
+        r1.nonselection_glyph = Line(line_alpha=1, line_color=col1, line_width=2)
 
-    # create reference velo vs dist plot
-    p0.line(df_r.dist_lap, df_r.speedkmh, color=next(colors), line_width=2)
+        # create reference velo vs dist plot
+        p0.line(df_r.dist_lap, df_r.speedkmh, color=next(colors), line_width=2)
 
     # create an invisible renderer for velo vs dist
     # this is used to trigger the hover, thus the size is large
@@ -536,12 +571,14 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     c0.selection_glyph = Circle(fill_color='red', fill_alpha=1., line_color=None)
     c0.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
 
-
     # create figure for track map
     p1 = figure(plot_height=400, plot_width=800, tools="crosshair,pan,reset,save,wheel_zoom")
 
+    # create map of the track
+    c1 = getLapFigure(p1, df_, ds, mode, hasref=(reference is not None))
+
     # add some lap tangents to guide the eye when comparing map and refmap
-    if mode not in ['absolut', 'gainloss']:
+    if reference is not None and mode not in ['absolut', 'gainloss']:
         x0 = df_.x.values
         y0 = df_.y.values
         h = df_.heading.values
@@ -549,16 +586,24 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
         y1 = y0 + 30*np.sin(h+np.pi/2)
         p1.segment(x0=x0, y0=y0, x1=x1, y1=y1, color="#F4A582", line_width=1)
 
-    # create map of the track
-    c1 = getLapFigure(p1, df_, ds, mode, hasref=True)
-
-    # calculate points for the reference map drawn 'outside' of the other track map
-    if mode not in ['absolut', 'gainloss']:
+        # calculate points for the reference map drawn 'outside' of the other track map
         getLapFigure(p1, df_, ds , mode, ref=True)
 
-
     # Toooltips that show some information for each point, triggered via slider.onchange JS
-    hover0 = createHoverTool(['time','dist','speedkmh','dt'])
+    tools = ['time','dist','speedkmh']
+    if reference is not None:
+        tools.append('speedkmh_r')
+        if mode not in ['absolut', 'gainloss', 'pedals', 'speed']:
+            tools.extend([mode, '%s_r'%mode])
+        elif mode in ['pedals']:
+            tools.extend(['throttle', 'throttle_r', 'brake', 'brake_r'])
+        tools.append('dt')
+    elif mode == 'pedals':
+        tools.extend(['throttle', 'brake'])
+    elif mode != 'speed':
+        tools.append(mode)
+
+    hover0 = createHoverTool(tools)
     # a small hack to show only one tooltip (hover selects multiple points)
     hover0.tooltips[-1] = (hover0.tooltips[-1][0], hover0.tooltips[-1][1]+"""
         <style>
@@ -568,9 +613,8 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     hover0.mode = 'vline'
     hover0.line_policy='interp'
 
-
     # selection change via button and slider. Tooltips 'hover0' will be rendered in 'p0' using rederer 'r0'
-    slider = getLapSlider(ds, p0, r0, hover0)
+    slider = getLapSlider(ds, p0, r0, hover0, view=view)
     btns = getLapControls(ds, slider)
 
     # Hovertools, that emit a selection change by modifying the slider value
@@ -591,3 +635,24 @@ def getLapDeltaFigure(df, reference, target, mode='absolut'):
     # p1.add_tools(hover1)
 
     return column(btns, slider, p0, p1)
+
+
+
+
+def getTrackMapPanel(df):
+    mode_select = Select(title="Mode:", value='speed',
+                         options=['oversteer',
+                                  'speed',
+                                  'pedals',
+                                  'throttle',
+                                  'brake',
+                                  'g_lon'])
+
+    layout = column(mode_select, getTrackMap(df, view='trackmap'))
+
+    def mode_change(attrname, old, new):
+        layout.children[1] = getTrackMap(df, view='trackmap', mode=new)
+
+    mode_select.on_change('value', mode_change)
+
+    return layout

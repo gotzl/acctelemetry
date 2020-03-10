@@ -16,7 +16,7 @@ def uploadButton(source, filter_source, track_select, car_select):
 
     file_source = ColumnDataSource({'file_contents':[], 'file_name':[]})
 
-    def file_callback(attr,old,new):
+    def file_callback(attr, old,new):
         print('filename:', file_source.data['file_name'])
         f = os.path.join(os.environ['TELEMETRY_FOLDER'], file_source.data['file_name'][0])
         if os.path.splitext(f)[1] not in ['.ld', '.ldx'] or os.path.exists(f):
