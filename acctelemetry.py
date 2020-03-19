@@ -49,6 +49,7 @@ def laps_times(laps):
     return laps_times
 
 
+# map from acti names to ACC names
 ac_chan_map = {
     'ABS Active': 'abs',
     'Brake Pos': 'brake',
@@ -72,6 +73,14 @@ ac_chan_map = {
     'Wheel Angular Speed FR':'wheel_speed_rf',
     'Wheel Angular Speed RL':'wheel_speed_lr',
     'Wheel Angular Speed RR':'wheel_speed_rr',
+    'Tire Pressure FL':'tyre_press_lf',
+    'Tire Pressure FR':'tyre_press_rf',
+    'Tire Pressure RL':'tyre_press_lr',
+    'Tire Pressure RR':'tyre_press_rr',
+    'Tire Temp Core FL':'tyre_tair_lf',
+    'Tire Temp Core FR':'tyre_tair_rf',
+    'Tire Temp Core RL':'tyre_tair_lr',
+    'Tire Temp Core RR':'tyre_tair_rr',
 }
 
 
@@ -435,15 +444,15 @@ def scanFiles(files):
     data = []
     for f in files:
         if not os.path.isfile(os.path.splitext(f)[0]+".ldx"): continue
-        head = ldparser.ldhead(f)
+        head = ldparser.ldHead.fromfile(open(f,'rb'))
         laps_ = laps_times(np.array(laps(f)))
         for i, lap in enumerate(laps_):
             if lap==0: continue
             data.append((os.path.basename(f),
                          head.datetime.strftime("%Y-%m-%d %H:%M:%S"),
-                         head.venue, head.vehicle if head.vehicle else head.descr, i,
+                         head.venue, head.vehicleid, i,
                          "%i:%02i.%03i"%(lap//60, lap%60, (lap*1e3)%1000),
-                         head.name,
+                         head.driver,
                          ))
 
     if len(data)==0:
