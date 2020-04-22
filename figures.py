@@ -335,7 +335,7 @@ def getLapDelta():
             # restrict to selected lap
             lap = int(filter_source.data['lap'][idx])
 
-            info = [ds, lap, head_.vehicle, laps_times[lap]]
+            info = [ds, lap, head_.vehicleid, laps_times[lap]]
             if track is None:
                 # df = df_
                 reference = info
