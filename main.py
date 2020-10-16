@@ -24,12 +24,9 @@ def callback():
         head_, chans = ldparser.read_ldfile(f_)
 
         laps = np.array(acctelemetry.laps(f_))
-        laps_limits = acctelemetry.laps_limits(laps, chans[4].freq, len(chans[4].data))
-        laps_times = acctelemetry.laps_times(laps)
-
         # create pandas DataFrame
         ds = acctelemetry.DataStore(
-            chans, laps_times, laps_limits,
+            chans, laps,
             acc=head_.event!='AC_LIVE'
         )
         # restrict to selected lap

@@ -331,7 +331,7 @@ def getLapDelta():
 
             # create DataStore that is used later to get pandas DataFrame
             ds = acctelemetry.DataStore(
-                chans, laps_times, laps_limits, acc=head_.event!='AC_LIVE')
+                chans, laps, acc=head_.event!='AC_LIVE')
             # restrict to selected lap
             lap = int(filter_source.data['lap'][idx])
 
