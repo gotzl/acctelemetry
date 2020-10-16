@@ -11,11 +11,12 @@ One or more laps can be selected and the data is displayed in the various tabs a
 ```bash
 pip3 install -r requirements.txt
 ```
+After cloning the repo, also checkout the submodules with `git submodule update --init`.
 
 ## Usage
 ```bash
 export TELEMETRY_FOLDER=='/../Documents/Assetto Corsa Competizione/MoTeC'
-bokeh serve --show ../acctelemetry
+bokeh serve --show .
 ```
 
 There is also a docker image
