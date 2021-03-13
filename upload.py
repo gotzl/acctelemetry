@@ -9,6 +9,7 @@ Created on Wed May 03 11:26:21 2017
 
 def uploadButton(source, filter_source, track_select, car_select):
     from bokeh.models import ColumnDataSource, CustomJS
+    from bokeh.events import ButtonClick
     from bokeh.models.widgets import Button
     from acctelemetry import updateTableData
 
@@ -38,7 +39,7 @@ def uploadButton(source, filter_source, track_select, car_select):
     file_source.on_change('data', file_callback)
 
     button = Button(label="Upload", button_type="success")
-    button.js_on_event('tap', CustomJS(
+    button.js_on_event(ButtonClick, CustomJS(
         args=dict(file_source=file_source, button=button), code="""
     function read_file(filename) {
         var reader = new FileReader();
