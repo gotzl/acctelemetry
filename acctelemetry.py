@@ -88,8 +88,8 @@ class DataStore(object):
     def __init__(self, channs, laps, acc=True):
         self.channs = channs
         self.acc = acc
-        self.freq = min([i.freq for i in channs])
-        self.n = min([len(i.data) for i in channs])
+        self.freq = 20
+        self.n = self.freq * len(self.channs[0].data)//self.channs[0].freq
         self.columns = {}
         self._df = None
         self.laps_limits = laps_limits(laps, self.freq, self.n)
@@ -104,18 +104,16 @@ class DataStore(object):
 
     def __getitem__(self, item):
         if item not in self.columns:
-            print("Creating column %s"%(item))
+            # print("Creating column %s"%(item))
 
             col = [n for n, x in enumerate(self.channs) if self.chan_name(x) == item]
             if len(col) != 1:
                 raise Exception("Could not reliably get column", col)
 
-            # reduce everything to the smallest freq 
-            stepsize = self.channs[col[0]].freq // self.freq
-            data = self.channs[col[0]].data[::stepsize]
-            # make sure that all the data has same length
-            if len(data) >= self.n: data = data[:self.n]
-            else: data = np.pad(data, (0, self.n - len(data)), 'constant')
+            # extend everything to the highest freq 
+            n = len(self.channs[col[0]].data)
+            x = np.arange(0, n, n / self.n)
+            data = np.interp(x, np.arange(0, n), self.channs[col[0]].data)
 
             # convert some of the data from ld file to integer
             if (self.acc and col[0] in [7, 11, 12]) or (not self.acc and col[0] in [62]):
@@ -158,10 +156,10 @@ class DataStore(object):
         # recalculate with correction
         df.alpha = df.alpha*fac
         df.heading = df.alpha.cumsum()
-        df.dx = df.ds * np.cos(df.heading*fac)
-        df.dy = df.ds * np.sin(df.heading*fac)
-        x = df.dx.cumsum()
-        y = df.dy.cumsum()
+        dx = df.ds * np.cos(df.heading*fac)
+        dy = df.ds * np.sin(df.heading*fac)
+        x = dx.cumsum()
+        y = dy.cumsum()
 
         df = pd.concat([df, pd.DataFrame(
             {'x':x,'y':y,

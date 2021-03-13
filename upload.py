@@ -38,7 +38,7 @@ def uploadButton(source, filter_source, track_select, car_select):
     file_source.on_change('data', file_callback)
 
     button = Button(label="Upload", button_type="success")
-    button.callback = CustomJS(
+    button.js_on_event('tap', CustomJS(
         args=dict(file_source=file_source, button=button), code="""
     function read_file(filename) {
         var reader = new FileReader();
@@ -71,5 +71,5 @@ def uploadButton(source, filter_source, track_select, car_select):
         }
     }
     input.click();
-    """)
+    """))
     return button

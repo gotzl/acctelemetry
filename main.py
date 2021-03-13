@@ -68,7 +68,7 @@ button.on_click(callback)
 tabs,figs = [],[]
 tabs.append(Panel(
     child=column(filters, data_table, button, uploadButton(
-        source, filter_source, track_select, car_select)),
+        source, filter_source, track_select, car_select), sizing_mode='scale_width'),
     title="Laps"))
 
 for ttl in ["LapData", "RPMs", "TyrePreassure", "TyreTair", "BrakeTemp", "Over/Understeer", "TrackMap"]:

@@ -1,4 +1,4 @@
-bokeh<2
+bokeh
 pandas
 matplotlib
 scipy

@@ -30,11 +30,11 @@ def createHoverTool(tools, mode='mouse'):
 
     return HoverTool(
         tooltips=[_tool(x) for x in tools],
-        formatters={'dist' : 'printf',
-                    'time' : 'printf',
-                    'dt' : 'printf',
-                    'dist_lap' : 'printf',
-                    'time_lap' : 'printf',
+        formatters={'@dist' : 'printf',
+                    '@time' : 'printf',
+                    '@dt' : 'printf',
+                    '@dist_lap' : 'printf',
+                    '@time_lap' : 'printf',
                     },
         mode=mode)
 
@@ -59,8 +59,8 @@ def getFigure(sources, x='dist_lap', width=800):
     ]
 
     # define the tooltips
-    tools = [
-        [
+    tools = [        [
+            ("Lap", "@lap"),
             ("Time", "@time_lap{%0.1f} s"),
             ("Dist", "@dist_lap{%0.1f} m"),
             ("Speed", "@speedkmh km/h")],
@@ -121,9 +121,9 @@ def getFigure(sources, x='dist_lap', width=800):
         h_ = HoverTool(
             tooltips=tool if len(h)==0 else tools[0]+tool,
             formatters={
-                'dist': 'printf',
-                'dist_lap': 'printf',
-                'time_lap': 'printf',
+                '@dist': 'printf',
+                '@dist_lap': 'printf',
+                '@time_lap': 'printf',
             },
             mode='mouse' if len(y)>1 or len(sources)>1 else 'vline')
 
@@ -140,7 +140,7 @@ def getFigure(sources, x='dist_lap', width=800):
             lap_t = "%i:%02i.%03i"%(lap_t//60,lap_t%60,(lap_t*1e3)%1000)
             for yi in y:
                 p_.line(x=x, y=yi, source=source,
-                        legend='%s | lap %s | %s'%(datetime, lap, lap_t) if len(p)==0 else '',
+                        legend_label='%s | lap %s | %s'%(datetime, lap, lap_t) + (' | %s'%yi if len(y)>1 else ''),
                         muted_color=next(muted_colors), muted_alpha=0.2,
                         line_width=3, line_alpha=0.6,
                         line_color=next(colors))
@@ -152,7 +152,7 @@ def getFigure(sources, x='dist_lap', width=800):
         c.append(c_)
         h.append(h_)
 
-    return gridplot(p, ncols=1)
+    return gridplot(p, ncols=1, sizing_mode='scale_width')
 
 
 def getRPMFigure(df):
@@ -168,7 +168,7 @@ def getRPMFigure(df):
     df_ = df.groupby('gear')
     for grp, df_ in df_:
         col = next(colors)
-        p1.circle(df_.speedkmh, df_.rpms, legend='gear %i'%grp,
+        p1.circle(df_.speedkmh, df_.rpms, legend_label='gear %i'%grp,
                   muted_color=col, muted_alpha=0.1,
                   size=3, color=col, line_color=None)
 
@@ -185,14 +185,14 @@ def getRPMFigure(df):
     for i in range(1,7):
         sel = df[ (df.gear==i) & (df.throttle>80)]
         col = next(colors)
-        p2.circle(sel.speedkmh, sel.g_lon, legend='gear %i'%i,
+        p2.circle(sel.speedkmh, sel.g_lon, legend_label='gear %i'%i,
                   muted_color=col, muted_alpha=0.1,
                   size=3, color=col, line_color=None)
 
     p2.legend.location = "top_right"
     p2.legend.click_policy="mute"
 
-    return column(p1,p2)
+    return column(p1,p2, sizing_mode='scale_width')
 
 
 def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None, x_range=None):
@@ -232,7 +232,7 @@ def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None, x_range=No
     ds = ColumnDataSource(df)
     for i in vars:
         p.line(x='dist_lap', y=i, source=ds,
-               legend='m = {}'.format(i),
+               legend_label='m = {}'.format(i),
                line_width=2, line_alpha=0.6,
                line_color=next(colors),
                y_range_name=y_range_name(i)
@@ -374,7 +374,7 @@ def getLapDelta():
 
     filter_source.selected.on_change('indices', callback_)
     tmp = figure(plot_height=500, plot_width=800)
-    layout = column(filters, data_table, mode_select, text_input, tmp, id='lapsdelta')
+    layout = column(filters, data_table, mode_select, text_input, tmp, id='lapsdelta', sizing_mode='scale_width')
     return layout
 
 
@@ -450,19 +450,29 @@ def getLapSlider(ds, p0, r0, hover0, view):
     let ind = slider.value;
     let x = source.data.dist_lap[ind];
     let y = source.data.speedkmh[ind];
-    let fig_view;
-    if (view == "trackmap") 
-        fig_view = Bokeh.index["tabs"]
-            ._child_views[view]
-            .child_views[0]
-            .child_views[1]
-            ._child_views[figure.id];
-    if (view == "lapsdelta") {
-        var lapsdelta_view = Bokeh.index["tabs"]._child_views[view].child_views;
-        fig_view = lapsdelta_view[lapsdelta_view.length-1]._child_views[figure.id];
+
+    function get_view(views, id) {
+        for (const [key, value] of views.entries()) {
+            if (key.id === id) {
+                return value;
+            }
+        }
     }
-    let hover_view = fig_view.tool_views[hovertool.id];
-    let renderer_view = fig_view.renderer_views[renderer.id];
+
+    let fig_view = get_view(Bokeh.index["tabs"]._child_views, view);
+
+    if (view === "trackmap") 
+        fig_view = get_view(fig_view.child_views[0]
+                    .child_views[1]
+                    ._child_views, figure.id);
+
+    if (view === "lapsdelta") {
+        var lapsdelta_view = fig_view.child_views;
+        fig_view = get_view(lapsdelta_view[lapsdelta_view.length-1]._child_views, figure.id);
+    }
+
+    let hover_view = get_view(fig_view.tool_views, hovertool.id);
+    let renderer_view = get_view(fig_view.renderer_views, renderer.id);
     let xs = renderer_view.xscale.compute(x);
     let ys = renderer_view.yscale.compute(y);
     hover_view._inspect(xs, ys);
@@ -605,10 +615,11 @@ def getTrackMap(target, reference=None, mode='speed', view='lapsdelta'):
 
     hover0 = createHoverTool(tools)
     # a small hack to show only one tooltip (hover selects multiple points)
-    hover0.tooltips[-1] = (hover0.tooltips[-1][0], hover0.tooltips[-1][1]+"""
-        <style>
-            .bk-tooltip>div:not(:first-child) {display:none;}
-        </style>""")
+    # TODO: doesn't work anymore with recent bokeh
+    # hover0.tooltips[-1] = (hover0.tooltips[-1][0], hover0.tooltips[-1][1]+"""
+    #     <style>
+    #         .bk-tooltip>div:not(:first-child) {display:none;}
+    #     </style>""")
     hover0.renderers = [r0]
     hover0.mode = 'vline'
     hover0.line_policy='interp'
@@ -634,7 +645,7 @@ def getTrackMap(target, reference=None, mode='speed', view='lapsdelta'):
     p0.add_tools(hover0)
     # p1.add_tools(hover1)
 
-    return column(btns, slider, p0, p1)
+    return column(btns, slider, p0, p1, sizing_mode='scale_width')
 
 
 
