@@ -109,14 +109,14 @@ class DataStore(object):
             col = [n for n, x in enumerate(self.channs) if self.chan_name(x) == item]
             if len(col) != 1:
                 raise Exception("Could not reliably get column", col)
+            col = col[0]
 
-            # extend everything to the highest freq 
-            n = len(self.channs[col[0]].data)
-            x = np.arange(0, n, n / self.n)
-            data = np.interp(x, np.arange(0, n), self.channs[col[0]].data)
+            n = len(self.channs[col].data)
+            x = np.linspace(0, n, self.n)
+            data = np.interp(x, np.arange(0, n), self.channs[col].data)
 
             # convert some of the data from ld file to integer
-            if (self.acc and col[0] in [7, 11, 12]) or (not self.acc and col[0] in [62]):
+            if (self.acc and col in [7, 11, 12]) or (not self.acc and col in [62]):
                 data = data.astype(int)
             # downsample channels to the one with lowest frequency (this takes way tooo long)
             # if len(data) != self.n:
@@ -453,7 +453,7 @@ def scanFiles(files):
             if lap==0: continue
             data.append((os.path.basename(f),
                          head.datetime.strftime("%Y-%m-%d %H:%M:%S"),
-                         head.venue, head.vehicleid, i,
+                         head.venue, head.event, i,
                          "%i:%02i.%03i"%(lap//60, lap%60, (lap*1e3)%1000),
                          head.driver,
                          ))
