@@ -137,7 +137,8 @@ def getFigure(sources, x='dist_lap', width=800):
             muted_colors = itertools.cycle(Spectral4)
 
         for datetime, lap, lap_t, source in sources:
-            lap_t = "%i:%02i.%03i"%(lap_t//60,lap_t%60,(lap_t*1e3)%1000)
+            if not isinstance(lap_t, str):
+                lap_t = "%i:%02i.%03i"%(lap_t//60,lap_t%60,(lap_t*1e3)%1000)
             for yi in y:
                 p_.line(x=x, y=yi, source=source,
                         legend_label='%s | lap %s | %s'%(datetime, lap, lap_t) + (' | %s'%yi if len(y)>1 else ''),
@@ -257,7 +258,7 @@ def getBrakeTempFigure(df):
             'throttle','brake']
     tools = ['time', 'dist', 'speed']+vars
     return getSimpleFigure(df, vars+['tc', 'abs'], tools,
-                           {"pedals": Range1d(start=-20, end=400), "tcabs": Range1d(start=-1, end=20)},
+                           {"pedals": Range1d(start=-20, end=1000), "tcabs": Range1d(start=-1, end=20)},
                            {"pedals":['throttle','brake'], "tcabs":['tc', 'abs']})
 
 def getWheelSpeedFigure(df):
@@ -288,19 +289,19 @@ def getTyrePreassureFigure(df):
 def getOversteerFigure(df):
     vars = ['speedkmh','oversteer','understeer']#,'steering_corr','neutral_steering']
     tools = ['time','dist']+vars
-    p0 =  getSimpleFigure(df, vars+['tc', 'throttle','brake'], tools,
+    p0 = getSimpleFigure(df, vars+['tc', 'throttle','brake'], tools,
                            {"pedals": Range1d(start=-10, end=500), "tc": Range1d(start=-1, end=50), "oversteer": Range1d(start=-15, end=25)},
                            {"pedals":['throttle','brake'], "tc":['tc','g_lat'], "oversteer":['steering_corr','neutral_steering','oversteer','understeer']})
 
     vars = ['g_lat', 'g_lon', 'g_sum','steering_corr','neutral_steering', 'oversteer', 'understeer']
     tools = ['time','dist']+vars
-    p1 =  getSimpleFigure(df, vars, tools,
+    p1 = getSimpleFigure(df, vars, tools,
                           {"oversteer": Range1d(start=-15, end=35)},
                           {"oversteer":['steering_corr','neutral_steering',
                                         'oversteer','understeer']},
                           x_range = p0.x_range)
 
-    return gridplot([p0,p1], ncols=1)
+    return gridplot([p0, p1], ncols=1, sizing_mode='scale_width')
 
 
 def getLapDelta():
@@ -313,35 +314,46 @@ def getLapDelta():
 
     def callback(mode):
         idxs = filter_source.selected.indices
-        if (len(idxs)<2):
+        if len(idxs) < 2:
             layout.children[-1] = tmp
             return
 
-        df, track, reference, target = None, None, None, None
-        for idx in idxs:
-            name = filter_source.data['name'][idx]
-            f_ = os.path.join(os.environ['TELEMETRY_FOLDER'].strip("'"), name)
-            head_, chans = ldparser.read_ldfile(f_)
-
-            # if track is not None and head_.descr1!=track: continue
-
-            laps = np.array(acctelemetry.laps(f_))
-            laps_limits = acctelemetry.laps_limits(laps, chans[4].freq, len(chans[4].data))
-            laps_times = acctelemetry.laps_times(laps)
-
-            # create DataStore that is used later to get pandas DataFrame
-            ds = acctelemetry.DataStore(
-                chans, laps, acc=head_.event!='AC_LIVE')
+        df, reference, track, target = None, None, None, None
+        for i, idx in enumerate(idxs):
             # restrict to selected lap
             lap = int(filter_source.data['lap'][idx])
+            name = filter_source.data['name'][idx]
 
-            info = [ds, lap, head_.vehicleid, laps_times[lap]]
-            if track is None:
-                # df = df_
-                reference = info
-                track = head_.venue
+            if len(name) > 3 and name[:3] == 'db:':
+                import pymongo
+                try:
+                    client = pymongo.MongoClient(os.environ['DB_HOST'], serverSelectionTimeoutMS=10)
+                    db = client.acc
+                except pymongo.errors.ServerSelectionTimeoutError as err:
+                    print(err)
+                    continue
+
+                name = name.split(':')
+                ds = acctelemetry.DBDataStore(db, *name[1:], lap)
+
             else:
-                # df = df.append(df_)
+                f_ = os.path.join(os.environ['TELEMETRY_FOLDER'].strip("'"), name)
+                head_, chans = ldparser.read_ldfile(f_)
+
+                laps = np.array(acctelemetry.laps(f_))
+
+                # create DataStore that is used later to get pandas DataFrame
+                ds = acctelemetry.LDDataStore(
+                    chans, laps, acc=head_.event!='AC_LIVE')
+
+            ident = filter_source.data['driver'][idx]
+            if len(ident) == 0:
+                ident = filter_source.data['car'][idx]
+            info = [ds, lap, ident, filter_source.data['time'][idx]]
+            if i == 0:
+                reference = info
+                track = filter_source.data['track'][idx]
+            else:
                 target = info
 
         if reference is None or target is None:
@@ -349,7 +361,7 @@ def getLapDelta():
             return
 
         # text_input.value = "%s: reference: %s (%i) | target: %s (%i)"%(track, reference, idxs[0], target, idxs[-1])
-        text_input.value = "%s | %s: reference: %s / %.3f (%i) | target: %s / %.3f (%i)"%\
+        text_input.value = "%s | %s: reference: %s / %s (%i) | target: %s / %s (%i)" % \
                            (track, mode, reference[2], reference[3], idxs[0],
                             target[2], target[3], idxs[-1])
 

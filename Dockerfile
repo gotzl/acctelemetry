@@ -1,4 +1,8 @@
-FROM python:3.6-slim-stretch
+FROM python:3.9-slim-buster
+
+RUN apt-get update \ 
+	&& apt-get install build-essential -y \ 
+	&& apt-get clean
 
 ENV TELEMETRY_FOLDER=/telemetry
 RUN mkdir /telemetry
@@ -12,5 +16,6 @@ RUN chmod +x /entrypoint.sh
 ENV ORIGIN="localhost:5100" PORT="5100" PREFIX="" LOG_LEVEL="info"
 
 ADD . /acctelemetry
+VOLUME /telemetry
 
 ENTRYPOINT ["./entrypoint.sh"]

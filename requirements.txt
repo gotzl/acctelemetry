@@ -2,3 +2,4 @@ bokeh
 pandas
 matplotlib
 scipy
+pymongo

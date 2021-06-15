@@ -83,8 +83,232 @@ ac_chan_map = {
     'Tire Temp Core RR':'tyre_tair_rr',
 }
 
+# map from pyacc shm names to ACC names
+acc_shmem_map = {
+    'packetId': 'packetId',
+    'abs': 'abs',
+    'brake': 'brake',
+    'brakeTemp': ['brake_temp_lf',
+                  'brake_temp_rf',
+                  'brake_temp_lr',
+                  'brake_temp_rr'],
+    'accG': ['g_lat',
+             'g_lon'],
+    'rpms': 'rpms',
+    'gear': 'gear',
+    'roll': 'roll',
+    'speedKmh': 'speedkmh',
+    'steerAngle': 'steerangle',
+    'suspensionTravel': ['sus_travel_lf',
+                         'sus_travel_rf',
+                         'sus_travel_lr',
+                         'sus_travel_rr'],
+    'tc': 'tc',
+    'gas': 'throttle',
+    'wheelSlip': ['wheel_slip_lf',
+                  'wheel_slip_rf',
+                  'wheel_slip_lr',
+                  'wheel_slip_rr'],
+    'wheelAngularSpeed': ['wheel_speed_lf',
+                          'wheel_speed_rf',
+                          'wheel_speed_lr',
+                          'wheel_speed_rr'],
+    'wheelsPressure': ['tyre_press_lf',
+                       'tyre_press_rf',
+                       'tyre_press_lr',
+                       'tyre_press_rr'],
+    'tyreContactPoint': ['tyre_contact_point_lf',
+                         'tyre_contact_point_rf',
+                         'tyre_contact_point_lr',
+                         'tyre_contact_point_rr'],
+    'tyreCoreTemperature': ['tyre_tair_lf',
+                            'tyre_tair_rf',
+                            'tyre_tair_lr',
+                            'tyre_tair_rr'],
+    'carDamage': ['damage_front',
+                  'damage_rear',
+                  'damage_left',
+                  'damage_right',
+                  'damage_centre']
+}
+
 
 class DataStore(object):
+
+
+    @staticmethod
+    def create_track(df, laps_times=None):
+        # dx = (2*r*np.tan(alpha/2)) * np.cos(heading)
+        # dy = (2*r*np.tan(alpha/2)) * np.sin(heading)
+        dx = df.ds * np.cos(df.heading)
+        dy = df.ds * np.sin(df.heading)
+
+        # calculate correction to close the track
+        # use best lap
+        if laps_times is None:
+            df_ = df
+        else:
+            fastest = np.argmin([999999 if x==0 else x for x in laps_times])
+            df_ = df[(df.lap==fastest)]
+        fac = 1.
+        dist = None
+        n = 0
+        while n < 1000:
+            dx = df_.ds * np.cos(df_.heading*fac)
+            dy = df_.ds * np.sin(df_.heading*fac)
+            end = (dx.cumsum()).values[-1], (dy.cumsum()).values[-1]
+            # print(end, dist, fac)
+
+            newdist = np.sqrt(end[0]**2+end[1]**2)
+            if dist is not None and newdist>dist: break
+            dist = newdist
+            fac -= 0.0001
+            n += 1
+
+        if n == 1000:
+            fac = 1.
+
+        # recalculate with correction
+        df.alpha = df.alpha*fac
+        df.heading = df.alpha.cumsum()
+        dx = df.ds * np.cos(df.heading*fac)
+        dy = df.ds * np.sin(df.heading*fac)
+        x = dx.cumsum()
+        y = dy.cumsum()
+
+        df = pd.concat([df, pd.DataFrame(
+            {'x':x,'y':y,
+             'dx':dx, 'dy':dy,
+             })], axis=1)
+
+        return df
+
+    @staticmethod
+    def calc_over_understeer(df):
+        # calculate oversteer, based on math in ACC MoTec workspace
+        wheelbase = 2.645
+        neutral_steering = (wheelbase * df.alpha * 180/np.pi).rolling(10).mean()
+
+        steering_corr= (df.steerangle/11)
+        oversteer  = np.sign(df.g_lat) * (neutral_steering-steering_corr)
+        understeer = oversteer.copy()
+
+        indices = understeer > 0
+        understeer[indices] = 0
+
+        df = pd.concat([df, pd.DataFrame(
+            {'steering_corr':steering_corr,
+             'neutral_steering':neutral_steering,
+             'oversteer':oversteer,
+             'understeer':understeer})], axis=1)
+        return df
+
+    @staticmethod
+    def add_cols(df, freq=None, n=None, laps_limits=None, lap=None):
+        if 'speedkmh' not in df.columns:
+            df = pd.concat([df, pd.DataFrame({'speedkmh': df.speed*3.6})], axis=1)
+        if 'speed' not in df.columns:
+            df = pd.concat([df, pd.DataFrame({'speed': df.speedkmh/3.6})], axis=1)
+
+        # create list with the distance
+        if 'ds' in df.columns:
+            ds = df.ds
+        else:
+            ds = (df.speed / freq)
+            df = pd.concat([df, pd.DataFrame({'ds': ds})], axis=1)
+
+        # create list with total time
+        if 'dt' in df.columns:
+            t = df.dt.cumsum()
+        else:
+            t = np.arange(n)*(1/freq)
+
+        # create list with the lap number, distance in lap, time in lap
+        s = np.array(df.ds.cumsum())
+        if laps_limits is None:
+            l, sl, tl = [lap]*len(s), s, t
+        else:
+            l, sl, tl = [], [], []
+            for n, (n1, n2) in enumerate(laps_limits):
+                l.extend([n]*(n2-n1))
+                sl.extend(list(s[n1:n2]-s[n1]))
+                tl.extend(list(t[n1:n2]-t[n1]))
+
+        # for calculate of x/y position on track from speed and g_lat
+        gN = 9.81
+        r = 1 / (gN * df.g_lat/df.speed.pow(2))
+        alpha = ds / r
+        heading = alpha.cumsum()
+
+        # add the lists to the dataframe
+        df = pd.concat([df, pd.DataFrame(
+            {'lap':l,
+             'g_sum': df.g_lon.abs()+df.g_lat.abs(),
+             'heading':heading,
+             'alpha':alpha,
+             'dist':s,'dist_lap':sl,
+             'time':t,'time_lap':tl})], axis=1)
+
+        return df
+
+    def get_data_frame(self, lap=None):
+        pass
+
+
+class DBDataStore(DataStore):
+    def __init__(self, db, sid, start, end, lap):
+        self.db = db
+        self.sid = sid
+        self.start = start
+        self.end = end
+        self.lap = lap
+
+    def get_data_frame(self, lap=None):
+        from bson.objectid import ObjectId
+
+        data = {}
+        for v in acc_shmem_map.values():
+            if isinstance(v, list):
+                for _v in v:
+                    data[_v] = []
+            else:
+                data[v] = []
+
+        data['ds'] = []
+        data['dt'] = []
+
+        for p in self.db.physics.find({
+            'sid': self.sid,
+            '_id': {
+                "$gte": ObjectId(self.start),
+                "$lt": ObjectId(self.end)}}).sort('packedId'):
+
+            # FIXME: frequency of packets seems to be 325 Hz ?
+            dt = 0 if len(data['packetId']) == 0 else (p['packetId'] - data['packetId'][-1])*(1/325)
+            ds = 0 if dt == 0 else (p['speedKmh']/3.6) * dt
+            data['dt'].append(dt)
+            data['ds'].append(ds)
+
+            for k, v in acc_shmem_map.items():
+                if isinstance(v, list):
+                    if k == 'tyreContactPoint' and len(p[k]) == 3:
+                        p[k] = np.array(p[k]).reshape((4, 3))
+                    for i, _v in enumerate(v):
+                        data[_v].append(p[k][i])
+                else:
+                    data[v].append(p[k])
+
+        df = pd.DataFrame(data)
+        df = DataStore.add_cols(df, lap=lap)
+        df = DataStore.calc_over_understeer(df)
+        df = DataStore.create_track(df)
+
+        if lap is not None:
+            df = df[df.lap==lap]
+        return df
+
+
+class LDDataStore(DataStore):
     def __init__(self, channs, laps, acc=True):
         self.channs = channs
         self.acc = acc
@@ -125,113 +349,14 @@ class DataStore(object):
             self.columns[item] = data
         return self.columns[item]
 
-    def create_track(self, df):
-        # dx = (2*r*np.tan(alpha/2)) * np.cos(heading)
-        # dy = (2*r*np.tan(alpha/2)) * np.sin(heading)
-        dx = df.ds * np.cos(df.heading)
-        dy = df.ds * np.sin(df.heading)
-
-        # calculate correction to close the track
-        # use best lap
-        fastest = np.argmin([999999 if x==0 else x for x in self.laps_times])
-        df_ = df[(df.lap==fastest)]
-        fac = 1.
-        dist = None
-        n = 0
-        while n < 1000:
-            dx = df_.ds * np.cos(df_.heading*fac)
-            dy = df_.ds * np.sin(df_.heading*fac)
-            end = (dx.cumsum()).values[-1], (dy.cumsum()).values[-1]
-            # print(end, dist, fac)
-
-            newdist = np.sqrt(end[0]**2+end[1]**2)
-            if dist is not None and newdist>dist: break
-            dist = newdist
-            fac -= 0.0001
-            n +=1
-
-        if n == 1000:
-            fac = 1.
-
-        # recalculate with correction
-        df.alpha = df.alpha*fac
-        df.heading = df.alpha.cumsum()
-        dx = df.ds * np.cos(df.heading*fac)
-        dy = df.ds * np.sin(df.heading*fac)
-        x = dx.cumsum()
-        y = dy.cumsum()
-
-        df = pd.concat([df, pd.DataFrame(
-            {'x':x,'y':y,
-             'dx':dx, 'dy':dy,
-             })], axis=1)
-
-        return df
-
-    def calc_over_understeer(self, df):
-        # calculate oversteer, based on math in ACC MoTec workspace
-        wheelbase = 2.645
-        neutral_steering = (wheelbase * df.alpha * 180/np.pi).rolling(10).mean()
-
-        steering_corr= (df.steerangle/11)
-        oversteer  = np.sign(df.g_lat) * (neutral_steering-steering_corr)
-        understeer = oversteer.copy()
-
-        indices = understeer > 0
-        understeer[indices] = 0
-
-        df = pd.concat([df, pd.DataFrame(
-            {'steering_corr':steering_corr,
-             'neutral_steering':neutral_steering,
-             'oversteer':oversteer,
-             'understeer':understeer})], axis=1)
-        return df
-
-    def add_cols(self, df):
-        if self.acc: speed = {'speedkmh': df.speed*3.6}
-        else: speed = {'speed': df.speedkmh/3.6}
-
-        df = pd.concat([df, pd.DataFrame(speed)], axis=1)
-
-        # create list with the total distance
-        ds = (df.speed / self.freq)
-        s = ds.cumsum()
-
-        # create list with total time
-        t = np.arange(self.n)*(1/self.freq)
-
-        # create list with the lap number, distance in lap, time in lap
-        s = np.array(s)
-        l, sl, tl = [],[],[]
-        for n, (n1, n2) in enumerate(self.laps_limits):
-            l.extend([n]*(n2-n1))
-            sl.extend(list(s[n1:n2]-s[n1]))
-            tl.extend(list(t[n1:n2]-t[n1]))
-
-        # for calculate of x/y position on track from speed and g_lat
-        gN = 9.81
-        r = 1 / (gN * df.g_lat/df.speed.pow(2))
-        alpha = ds / r
-        heading = alpha.cumsum()
-
-        # add the lists to the dataframe
-        df = pd.concat([df, pd.DataFrame(
-            {'lap':l,
-             'g_sum': df.g_lon.abs()+df.g_lat.abs(),
-             'heading':heading,
-             'alpha':alpha, 'ds':ds,
-             'dist':s,'dist_lap':sl,
-             'time':t,'time_lap':tl})], axis=1)
-        return df
-
     def get_data_frame(self, lap=None):
         for x in self.channs:
             _ = self[self.chan_name(x)]
 
         df = pd.DataFrame(self.columns)
-        df = self.add_cols(df)
-        df = self.create_track(df)
-        df = self.calc_over_understeer(df)
+        df = DataStore.add_cols(df, self.freq, self.n, self.laps_limits)
+        df = DataStore.create_track(df)
+        df = DataStore.calc_over_understeer(df)
 
         if lap is not None:
             df = df[df.lap==lap]
@@ -452,30 +577,108 @@ def scanFiles(files):
         for i, lap in enumerate(laps_):
             if lap==0: continue
             data.append((os.path.basename(f),
-                         head.datetime.strftime("%Y-%m-%d %H:%M:%S"),
+                         head.datetime,
                          head.venue, head.event, i,
                          "%i:%02i.%03i"%(lap//60, lap%60, (lap*1e3)%1000),
                          head.driver,
                          ))
+    return data
 
-    if len(data)==0:
-        return dict()
 
-    data = np.array(data)
-    return dict(
-        name=data[:,0],
-        datetime=data[:,1],
-        track=data[:,2],
-        car=data[:,3],
-        lap=data[:,4],
-        time=data[:,5],
-        driver=data[:,6]
-    )
+def scanDB(db):
+    connections = db.static.aggregate(
+        [{'$group':
+             {'_id': {
+                 'sid': '$sid',
+                 'track': '$track',
+                 'carModel': '$carModel',
+                 'playerNick': '$playerNick',
+                 'playerName': '$playerName',
+                 'playerSurname': '$playerSurname',
+             },
+                 "num_statics" : {"$sum": 1},
+                 "min_id": {"$min": '$_id'},
+                 "max_id": {"$max": '$_id'},
+             }},
+             {'$sort': {
+                "min_id": -1,
+                "_id.playerSurname": 1,
+                "_id.playerName": 1,
+             }},
+            {'$match': {'num_statics': {'$gt': 300}}},  # require a minimum of 5mins recorded time
+         ])
+
+    data = []
+    for con in connections:
+        laps = db.graphics.aggregate(
+            [{'$match':
+                  {'sid': con['_id']['sid'],
+                   'completedLaps': {"$gt": 0},
+                   '_id': {"$gte": con['min_id'],
+                           "$lt": con['max_id']}
+                   }},
+             {'$group':
+                 {'_id': {
+                     'session': '$session',
+                     'lap': '$completedLaps',
+                 },
+                     'iLastTime': {'$max': '$iLastTime'},
+                     'min_id': {'$min': '$_id'},
+                     'max_id': {'$max': '$_id'},
+                 }},
+             {'$sort': {'_id': -1}},
+             ])
+
+        # check if there's data
+        if not laps.alive:
+            continue
+
+        _time, _lap = None, None
+        for l in laps:
+            # first lap or 'jump' in lap count - don't store data of this lap, save
+            # laptime of preceding lap
+            if _lap is None or l['_id']['lap'] != _lap - 1:
+                _time = None
+
+            if _time is not None:
+                data.append(('db:%s:%s:%s' % (con['_id']['sid'], l['min_id'], l['max_id']),
+                         con['min_id'].generation_time.replace(tzinfo=None),
+                         con['_id']['track'], con['_id']['carModel'], l['_id']['lap'],
+                         "%i:%02i.%03i"%(_time//60, _time%60, (_time*1e3) % 1000),
+                         con['_id']['playerNick']
+                         if len(con['_id']['playerNick']) > 0
+                         else "%s %s" % (con['_id']['playerName'], con['_id']['playerSurname']),
+                         ))
+            _time = l['iLastTime']/1000
+            _lap = l['_id']['lap']
+
+    return data
 
 
 def updateTableData(source, filter_source, track_select, car_select):
     data = scanFiles(glob.glob(os.path.join(os.environ['TELEMETRY_FOLDER'].strip("'"), '*.ld')))
 
+    if 'DB_HOST' in os.environ:
+        import pymongo
+        try:
+            client = pymongo.MongoClient(os.environ['DB_HOST'], serverSelectionTimeoutMS=10)
+            client.server_info()
+            db = client.acc
+            data.extend(scanDB(db))
+        except pymongo.errors.ServerSelectionTimeoutError as err:
+            print('DB not available', err)
+            pass
+
+    data = np.array(sorted(data, key=lambda x: (x[1], x[6], x[4]), reverse=True))
+    data = dict(
+        name=data[:, 0],
+        datetime=[d.strftime("%Y-%m-%d %H:%M:%S") for d in data[:, 1]],
+        track=data[:, 2],
+        car=data[:, 3],
+        lap=data[:, 4],
+        time=data[:, 5],
+        driver=data[:, 6]
+    )
     source.data = data
     filter_source.data = copy.copy(data)
 
