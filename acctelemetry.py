@@ -92,8 +92,7 @@ acc_shmem_map = {
                   'brake_temp_rf',
                   'brake_temp_lr',
                   'brake_temp_rr'],
-    'accG': ['g_lat',
-             'g_lon'],
+    'accG': ['g_lat', 'accG', 'g_lon'],
     'rpms': 'rpms',
     'gear': 'gear',
     'roll': 'roll',
@@ -134,8 +133,6 @@ acc_shmem_map = {
 
 
 class DataStore(object):
-
-
     @staticmethod
     def create_track(df, laps_times=None):
         # dx = (2*r*np.tan(alpha/2)) * np.cos(heading)
@@ -256,15 +253,17 @@ class DataStore(object):
 
 
 class DBDataStore(DataStore):
-    def __init__(self, db, sid, start, end, lap):
+    def __init__(self, db, sid, start, end, lap, car_model):
         self.db = db
         self.sid = sid
         self.start = start
         self.end = end
         self.lap = lap
+        self.car_model = car_model
 
     def get_data_frame(self, lap=None):
         from bson.objectid import ObjectId
+        from pyacc import acc_types
 
         data = {}
         for v in acc_shmem_map.values():
@@ -299,6 +298,13 @@ class DBDataStore(DataStore):
                     data[v].append(p[k])
 
         df = pd.DataFrame(data)
+        # make scales comparable to those in motec files
+        df.steerangle *= -1 * acc_types.maxSteeringAngle[getattr(acc_types.CAR_MODEL, self.car_model)]
+        for i in ['throttle', 'brake']:
+            df[i] *= 100
+        for i in ['sus_travel_lf', 'sus_travel_rf', 'sus_travel_lr', 'sus_travel_rr']:
+            df[i] *= 1000
+
         df = DataStore.add_cols(df, lap=lap)
         df = DataStore.calc_over_understeer(df)
         df = DataStore.create_track(df)
@@ -641,14 +647,15 @@ def scanDB(db):
                 _time = None
 
             if _time is not None:
-                data.append(('db:%s:%s:%s' % (con['_id']['sid'], l['min_id'], l['max_id']),
-                         con['min_id'].generation_time.replace(tzinfo=None),
-                         con['_id']['track'], con['_id']['carModel'], l['_id']['lap'],
-                         "%i:%02i.%03i"%(_time//60, _time%60, (_time*1e3) % 1000),
-                         con['_id']['playerNick']
-                         if len(con['_id']['playerNick']) > 0
-                         else "%s %s" % (con['_id']['playerName'], con['_id']['playerSurname']),
-                         ))
+                data.append(('db:%s:%s:%s' % (
+                    con['_id']['sid'], l['min_id'], l['max_id']),
+                    con['min_id'].generation_time.replace(tzinfo=None),
+                    con['_id']['track'],
+                    con['_id']['carModel'], l['_id']['lap'],
+                    "%i:%02i.%03i"%(_time//60, _time%60, (_time*1e3) % 1000),
+                     con['_id']['playerNick']  if len(con['_id']['playerNick']) > 0
+                        else "%s %s" % (con['_id']['playerName'], con['_id']['playerSurname']),
+                    ))
             _time = l['iLastTime']/1000
             _lap = l['_id']['lap']
 
@@ -683,7 +690,7 @@ def updateTableData(source, filter_source, track_select, car_select):
     filter_source.data = copy.copy(data)
 
     getOptions = lambda key: \
-        (['ALL'] + np.unique(source.data[key]).tolist()) \
+        (['ALL'] + list(map(str, np.unique(source.data[key])))) \
             if key in source.data else ['ALL']
 
     track_select.options=getOptions('track')

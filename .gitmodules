@@ -1,3 +1,6 @@
 [submodule "ldparser"]
 	path = ldparser
 	url = https://github.com/gotzl/ldparser.git
+[submodule "pyacc"]
+	path = pyacc
+	url = https://github.com/gotzl/pyacc.git

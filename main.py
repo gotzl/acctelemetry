@@ -27,7 +27,7 @@ def callback():
         datetime = filter_source.data['datetime'][idx]
         time = filter_source.data['time'][idx]
         # track = filter_source.data['track'][idx]
-        # carModel = filter_source.data['car'][idx]
+        car_model = filter_source.data['car'][idx]
         if len(name) > 3 and name[:3] == 'db:':
             import pymongo
             try:
@@ -38,7 +38,7 @@ def callback():
                 continue
 
             name = name.split(':')
-            ds = acctelemetry.DBDataStore(db, *name[1:], lap)
+            ds = acctelemetry.DBDataStore(db, *name[1:], lap, car_model)
 
         else:
             f_ = os.path.join(os.environ['TELEMETRY_FOLDER'].strip("'"), filter_source.data['name'][idx])

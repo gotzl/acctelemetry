@@ -258,7 +258,7 @@ def getBrakeTempFigure(df):
             'throttle','brake']
     tools = ['time', 'dist', 'speed']+vars
     return getSimpleFigure(df, vars+['tc', 'abs'], tools,
-                           {"pedals": Range1d(start=-20, end=1000), "tcabs": Range1d(start=-1, end=20)},
+                           {"pedals": Range1d(start=-20, end=700), "tcabs": Range1d(start=-1, end=20)},
                            {"pedals":['throttle','brake'], "tcabs":['tc', 'abs']})
 
 def getWheelSpeedFigure(df):
