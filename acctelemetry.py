@@ -282,8 +282,8 @@ class DBDataStore(DataStore):
                 "$gte": ObjectId(self.start),
                 "$lt": ObjectId(self.end)}}).sort('packedId'):
 
-            # FIXME: frequency of packets seems to be 325 Hz ?
-            dt = 0 if len(data['packetId']) == 0 else (p['packetId'] - data['packetId'][-1])*(1/325)
+            # FIXME: frequency of packets seems to be 333 Hz ?
+            dt = 0 if len(data['packetId']) == 0 else (p['packetId'] - data['packetId'][-1])*(1/333)
             ds = 0 if dt == 0 else (p['speedKmh']/3.6) * dt
             data['dt'].append(dt)
             data['ds'].append(ds)
@@ -591,53 +591,83 @@ def scanFiles(files):
     return data
 
 
-def scanDB(db):
+def get_laps_meta(db, track=None, playerName=None, playerSurname=None, match=None):
+    group = {'_id': {
+            'sid': '$sid',
+            'carModel': '$carModel',
+        },
+            "num_statics": {"$sum": 1},
+            "min_id": {"$min": '$_id'},
+            "max_id": {"$max": '$_id'},
+        }
+
+    if match is None: match = {}
+    if track is None: group['_id']['track'] = '$track'
+    else: match['track'] = track
+
+    if playerName is None: group['_id']['playerName'] = '$playerName'
+    else: match['playerName'] = playerName
+
+    if playerSurname is None: group['_id']['playerSurname'] = '$playerSurname'
+    else: match['playerSurname'] = playerSurname
+
+    if playerSurname is None and playerName is None:
+        group['_id']['playerNick'] = '$playerNick'
+
     connections = db.static.aggregate(
-        [{'$group':
-             {'_id': {
-                 'sid': '$sid',
-                 'track': '$track',
-                 'carModel': '$carModel',
-                 'playerNick': '$playerNick',
-                 'playerName': '$playerName',
-                 'playerSurname': '$playerSurname',
-             },
-                 "num_statics" : {"$sum": 1},
-                 "min_id": {"$min": '$_id'},
-                 "max_id": {"$max": '$_id'},
-             }},
-             {'$sort': {
-                "min_id": -1,
-                "_id.playerSurname": 1,
-                "_id.playerName": 1,
-             }},
-            {'$match': {'num_statics': {'$gt': 300}}},  # require a minimum of 5mins recorded time
+        [{'$match': match},
+         {'$group': group},
+         {'$sort': {
+             "min_id": -1,
+             "_id.playerSurname": 1,
+             "_id.playerName": 1,
+         }},
+         {'$match': {'num_statics': {'$gt': 300}}},  # require a minimum of 5mins recorded time
          ])
 
-    data = []
+    data = {
+        'sid': [],
+        'driver': [],
+        'track': [],
+        'carModel': [],
+        'session': [],
+        'lap': [],
+        'timedate': [],
+        'min_id': [],
+        'max_id': [],
+        'laptime': []
+    }
     for con in connections:
+        match = {'sid': con['_id']['sid'],
+                 'completedLaps': {"$gt": 0},
+                 '_id': {"$gte": con['min_id'],
+                         "$lt": con['max_id']}}
+        group = {'_id': {
+                'session': '$session',
+                'sessionIndex': '$sessionIndex',
+                'lap': '$completedLaps',
+            },
+                'iLastTime': {'$max': '$iLastTime'},
+                'min_id': {'$min': '$_id'},
+                'max_id': {'$max': '$_id'},
+            }
+
         laps = db.graphics.aggregate(
-            [{'$match':
-                  {'sid': con['_id']['sid'],
-                   'completedLaps': {"$gt": 0},
-                   '_id': {"$gte": con['min_id'],
-                           "$lt": con['max_id']}
-                   }},
-             {'$group':
-                 {'_id': {
-                     'session': '$session',
-                     'lap': '$completedLaps',
-                 },
-                     'iLastTime': {'$max': '$iLastTime'},
-                     'min_id': {'$min': '$_id'},
-                     'max_id': {'$max': '$_id'},
-                 }},
-             {'$sort': {'_id': -1}},
+            [{'$match': match},
+             {'$group': group},
+             {'$sort': {'min_id': -1}},
              ])
 
         # check if there's data
         if not laps.alive:
             continue
+
+        if playerSurname is None or playerName is None:
+            _driver = con['_id']['playerNick'] if len(con['_id']['playerNick']) > 0 \
+                else "%s %s" % (con['_id']['playerName'], con['_id']['playerSurname'])
+        else:
+            _driver = "%s %s" % (playerName, playerSurname)
+        _track = track if track is not None else con['_id']['track']
 
         _time, _lap = None, None
         for l in laps:
@@ -647,19 +677,29 @@ def scanDB(db):
                 _time = None
 
             if _time is not None:
-                data.append(('db:%s:%s:%s' % (
-                    con['_id']['sid'], l['min_id'], l['max_id']),
-                    con['min_id'].generation_time.replace(tzinfo=None),
-                    con['_id']['track'],
-                    con['_id']['carModel'], l['_id']['lap'],
-                    "%i:%02i.%03i"%(_time//60, _time%60, (_time*1e3) % 1000),
-                     con['_id']['playerNick']  if len(con['_id']['playerNick']) > 0
-                        else "%s %s" % (con['_id']['playerName'], con['_id']['playerSurname']),
-                    ))
+                data['sid'].append(con['_id']['sid'])
+                data['driver'].append(_driver)
+                data['track'].append(_track)
+                data['carModel'].append(con['_id']['carModel'])
+                data['session'].append(l['_id']['session'])
+                data['lap'].append(l['_id']['lap'])
+                data['timedate'].append(l['min_id'].generation_time.replace(tzinfo=None))
+                data['min_id'].append(l['min_id'])
+                data['max_id'].append(l['max_id'])
+                data['laptime'].append(_time)
+
             _time = l['iLastTime']/1000
             _lap = l['_id']['lap']
 
     return data
+
+
+def scanDB(db):
+    l = get_laps_meta(db)
+    return [('db:%s:%s:%s' % (l['sid'][i], l['min_id'][i], l['max_id'][i]),
+            l['timedate'][i],  l['track'][i], l['carModel'][i], l['lap'][i],
+            "%i:%02i.%03i"%(l['laptime'][i]//60, l['laptime'][i]%60, (l['laptime'][i]*1e3) % 1000),
+            l['driver'][i]) for i in range(len(l['sid']))]
 
 
 def updateTableData(source, filter_source, track_select, car_select):

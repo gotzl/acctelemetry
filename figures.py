@@ -323,6 +323,7 @@ def getLapDelta():
             # restrict to selected lap
             lap = int(filter_source.data['lap'][idx])
             name = filter_source.data['name'][idx]
+            car_model = filter_source.data['car'][idx]
 
             if len(name) > 3 and name[:3] == 'db:':
                 import pymongo
@@ -334,7 +335,7 @@ def getLapDelta():
                     continue
 
                 name = name.split(':')
-                ds = acctelemetry.DBDataStore(db, *name[1:], lap)
+                ds = acctelemetry.DBDataStore(db, *name[1:], lap, car_model)
 
             else:
                 f_ = os.path.join(os.environ['TELEMETRY_FOLDER'].strip("'"), name)

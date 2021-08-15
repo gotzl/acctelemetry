@@ -18,4 +18,4 @@ ENV ORIGIN="localhost:5100" PORT="5100" PREFIX="" LOG_LEVEL="info"
 ADD . /acctelemetry
 VOLUME /telemetry
 
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
