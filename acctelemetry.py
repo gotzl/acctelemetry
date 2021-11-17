@@ -98,6 +98,7 @@ acc_shmem_map = {
     'roll': 'roll',
     'speedKmh': 'speedkmh',
     'steerAngle': 'steerangle',
+    'heading': 'heading',
     'suspensionTravel': ['sus_travel_lf',
                          'sus_travel_rf',
                          'sus_travel_lr',
@@ -137,8 +138,8 @@ class DataStore(object):
     def create_track(df, laps_times=None):
         # dx = (2*r*np.tan(alpha/2)) * np.cos(heading)
         # dy = (2*r*np.tan(alpha/2)) * np.sin(heading)
-        dx = df.ds * np.cos(df.heading)
-        dy = df.ds * np.sin(df.heading)
+        # dx = df.ds * np.cos(df.heading)
+        # dy = df.ds * np.sin(df.heading)
 
         # calculate correction to close the track
         # use best lap
@@ -201,27 +202,22 @@ class DataStore(object):
         return df
 
     @staticmethod
-    def add_cols(df, freq=None, n=None, laps_limits=None, lap=None):
+    def add_cols(df, laps_limits=None, lap=None):
         if 'speedkmh' not in df.columns:
-            df = pd.concat([df, pd.DataFrame({'speedkmh': df.speed*3.6})], axis=1)
+            df['speedkmh'] = df.speed*3.6
         if 'speed' not in df.columns:
-            df = pd.concat([df, pd.DataFrame({'speed': df.speedkmh/3.6})], axis=1)
+            df['speed'] = df.speedkmh/3.6
 
         # create list with the distance
-        if 'ds' in df.columns:
-            ds = df.ds
-        else:
-            ds = (df.speed / freq)
-            df = pd.concat([df, pd.DataFrame({'ds': ds})], axis=1)
-
+        dv = df['speed'] - df['speed'].shift(1, fill_value=df['speed'][0])
+        df['ds'] = (df.speed + dv) * df.dt
+        # division by zero ...
+        df.at[0, 'ds'] = 0
         # create list with total time
-        if 'dt' in df.columns:
-            t = df.dt.cumsum()
-        else:
-            t = np.arange(n)*(1/freq)
+        t = df.dt.cumsum()
 
         # create list with the lap number, distance in lap, time in lap
-        s = np.array(df.ds.cumsum())
+        s = df.ds.cumsum().values
         if laps_limits is None:
             l, sl, tl = [lap]*len(s), s, t
         else:
@@ -232,16 +228,18 @@ class DataStore(object):
                 tl.extend(list(t[n1:n2]-t[n1]))
 
         # for calculate of x/y position on track from speed and g_lat
-        gN = 9.81
-        r = 1 / (gN * df.g_lat/df.speed.pow(2))
-        alpha = ds / r
-        heading = alpha.cumsum()
+        if 'heading' not in df.columns:
+            gN = 9.81
+            r = 1 / (gN * df.g_lat/df.speed.pow(2))
+            alpha = df.ds / r
+            df['heading'] = alpha.cumsum()
+        else:
+            alpha = df['heading'] - df['heading'].shift(1, fill_value=df['heading'][0])
 
         # add the lists to the dataframe
         df = pd.concat([df, pd.DataFrame(
             {'lap':l,
              'g_sum': df.g_lon.abs()+df.g_lat.abs(),
-             'heading':heading,
              'alpha':alpha,
              'dist':s,'dist_lap':sl,
              'time':t,'time_lap':tl})], axis=1)
@@ -273,20 +271,11 @@ class DBDataStore(DataStore):
             else:
                 data[v] = []
 
-        data['ds'] = []
-        data['dt'] = []
-
         for p in self.db.physics.find({
             'sid': self.sid,
             '_id': {
                 "$gte": ObjectId(self.start),
                 "$lt": ObjectId(self.end)}}).sort('packedId'):
-
-            # FIXME: frequency of packets seems to be 333 Hz ?
-            dt = 0 if len(data['packetId']) == 0 else (p['packetId'] - data['packetId'][-1])*(1/333)
-            ds = 0 if dt == 0 else (p['speedKmh']/3.6) * dt
-            data['dt'].append(dt)
-            data['ds'].append(ds)
 
             for k, v in acc_shmem_map.items():
                 if isinstance(v, list):
@@ -298,6 +287,8 @@ class DBDataStore(DataStore):
                     data[v].append(p[k])
 
         df = pd.DataFrame(data)
+        # FIXME: frequency of packets seems to be 333 Hz ?
+        df['dt'] = (df['packetId'] - df['packetId'].shift(1, fill_value=df['packetId'][0]))/333
         # make scales comparable to those in motec files
         df.steerangle *= -1 * acc_types.maxSteeringAngle[getattr(acc_types.CAR_MODEL, self.car_model)]
         for i in ['throttle', 'brake']:
@@ -307,7 +298,19 @@ class DBDataStore(DataStore):
 
         df = DataStore.add_cols(df, lap=lap)
         df = DataStore.calc_over_understeer(df)
-        df = DataStore.create_track(df)
+        # df = DataStore.create_track(df)
+        for p in self.db.graphics.find({
+            'sid': self.sid,
+            '_id': {
+                "$gte": ObjectId(self.start),
+                "$lt": ObjectId(self.end)}}).sort('packedId'):
+
+            _id = p['carID'].index(p['playerCarID'])
+            _idx = df['time'].searchsorted(p['iCurrentTime']/1000)
+            df.at[_idx, 'x'] = p['carCoordinates'][_id][0]
+            df.at[_idx, 'y'] = p['carCoordinates'][_id][2]
+        df['x'] = df['x'].interpolate(method='linear', axis=0).bfill()
+        df['y'] = df['y'].interpolate(method='linear', axis=0).bfill()
 
         if lap is not None:
             df = df[df.lap==lap]
@@ -360,7 +363,8 @@ class LDDataStore(DataStore):
             _ = self[self.chan_name(x)]
 
         df = pd.DataFrame(self.columns)
-        df = DataStore.add_cols(df, self.freq, self.n, self.laps_limits)
+        df['dt'] = 1/self.freq
+        df = DataStore.add_cols(df, self.laps_limits)
         df = DataStore.create_track(df)
         df = DataStore.calc_over_understeer(df)
 
@@ -406,7 +410,7 @@ def lapdelta(reference, target):
     # for each track position in a with time ta
     # - find track position in b, interpolate
     dt_, speed, speedkmh, throttle, brake, g_lon, xr, yr, oversteer = [],[],[],[],[],[],[],[],[]
-    a_idx, b_idx = 0,0
+    a_idx, b_idx = 0, 0
     for idx in range(len(df_a)):
         # the b_idx closest to current track position in a
         b_idx = findidx(df_a.dist_lap.values[idx], df_b, b_idx)
@@ -447,14 +451,14 @@ def adddeltacolors(df, style=None):
     if style == 'grad':
         dt = pd.Series(np.gradient(dt), index=df.index)
         m = dt.abs().max()
-        b_ = dt[(dt.abs()<=.001)].map(lambda x:cmapb.to_rgba(x/m))
+        b_ = dt[(dt.abs()<=.001)].map(lambda x:cmapb.to_rgba(0 if m==0 else x/m))
         r_ = dt[(dt.abs()>.001) & (dt>0)].abs().map(lambda x:cmapr.to_rgba(x/m))
-        g_ = dt[(dt.abs()>.001) & (dt<=0)].abs().map(lambda x:cmapg.to_rgba(x/m))
+        g_ = dt[(dt.abs()>.001) & (dt<=0)].abs().map(lambda x:cmapg.to_rgba(0 if m==0 else x/m))
         return df.assign(color_gainloss=pd.concat([b_,g_,r_]))
 
     m = dt.max()
     g_ = dt[(dt<0)].abs().map(lambda x:cmapg.to_rgba(x/m))
-    r_ = dt[(dt>=0)].abs().map(lambda x:cmapr.to_rgba(x/m))
+    r_ = dt[(dt>=0)].abs().map(lambda x:cmapr.to_rgba(0 if m==0 else x/m))
     return df.assign(color_absolut=pd.concat([g_,r_]))
 
 
@@ -623,6 +627,7 @@ def get_laps_meta(db, track=None, playerName=None, playerSurname=None, match=Non
              "_id.playerName": 1,
          }},
          {'$match': {'num_statics': {'$gt': 300}}},  # require a minimum of 5mins recorded time
+         {'$limit': 15} # only last x connections
          ])
 
     data = {
@@ -715,6 +720,9 @@ def updateTableData(source, filter_source, track_select, car_select):
         except pymongo.errors.ServerSelectionTimeoutError as err:
             print('DB not available', err)
             pass
+
+    if len(data)==0:
+        return
 
     data = np.array(sorted(data, key=lambda x: (x[1], x[6], x[4]), reverse=True))
     data = dict(
