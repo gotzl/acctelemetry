@@ -185,20 +185,11 @@ class DataStore(object):
     def calc_over_understeer(df):
         # calculate oversteer, based on math in ACC MoTec workspace
         wheelbase = 2.645
-        neutral_steering = (wheelbase * df.alpha * 180/np.pi).rolling(10).mean()
-
-        steering_corr= (df.steerangle/11)
-        oversteer  = np.sign(df.g_lat) * (neutral_steering-steering_corr)
-        understeer = oversteer.copy()
-
-        indices = understeer > 0
-        understeer[indices] = 0
-
-        df = pd.concat([df, pd.DataFrame(
-            {'steering_corr':steering_corr,
-             'neutral_steering':neutral_steering,
-             'oversteer':oversteer,
-             'understeer':understeer})], axis=1)
+        df['neutral_steering'] = (wheelbase * df.alpha * 180/np.pi).rolling(10).mean()
+        df['steering_corr'] = df.steerangle/11
+        df['oversteer'] = np.sign(df.g_lat) * (df['neutral_steering']-df['steering_corr'])
+        df['understeer'] = df['oversteer']
+        df.at[df['understeer'] > 0, 'understeer'] = 0
         return df
 
     @staticmethod
@@ -234,7 +225,14 @@ class DataStore(object):
             alpha = df.ds / r
             df['heading'] = alpha.cumsum()
         else:
-            alpha = df['heading'] - df['heading'].shift(1, fill_value=df['heading'][0])
+            alpha = []
+            for a, b in zip(df['heading'], df['heading'].shift(1, fill_value=df['heading'][0])):
+                if a-b > np.pi:
+                    alpha.append(a-abs(b))
+                elif b-a > np.pi:
+                    alpha.append(abs(a)-b)
+                else:
+                    alpha.append(a-b)
 
         # add the lists to the dataframe
         df = pd.concat([df, pd.DataFrame(
@@ -290,7 +288,8 @@ class DBDataStore(DataStore):
         # FIXME: frequency of packets seems to be 333 Hz ?
         df['dt'] = (df['packetId'] - df['packetId'].shift(1, fill_value=df['packetId'][0]))/333
         # make scales comparable to those in motec files
-        df.steerangle *= -1 * acc_types.maxSteeringAngle[getattr(acc_types.CAR_MODEL, self.car_model)]
+        df.steerangle *= acc_types.maxSteeringAngle[getattr(acc_types.CAR_MODEL, self.car_model)]
+        df.gear -= 1
         for i in ['throttle', 'brake']:
             df[i] *= 100
         for i in ['sus_travel_lf', 'sus_travel_rf', 'sus_travel_lr', 'sus_travel_rr']:
@@ -311,6 +310,7 @@ class DBDataStore(DataStore):
             df.at[_idx, 'y'] = p['carCoordinates'][_id][2]
         df['x'] = df['x'].interpolate(method='linear', axis=0).bfill()
         df['y'] = df['y'].interpolate(method='linear', axis=0).bfill()
+        df['x'] *= -1
 
         if lap is not None:
             df = df[df.lap==lap]
@@ -452,12 +452,12 @@ def adddeltacolors(df, style=None):
         dt = pd.Series(np.gradient(dt), index=df.index)
         m = dt.abs().max()
         b_ = dt[(dt.abs()<=.001)].map(lambda x:cmapb.to_rgba(0 if m==0 else x/m))
-        r_ = dt[(dt.abs()>.001) & (dt>0)].abs().map(lambda x:cmapr.to_rgba(x/m))
+        r_ = dt[(dt.abs()>.001) & (dt>0)].abs().map(lambda x:cmapr.to_rgba(0 if m==0 else x/m))
         g_ = dt[(dt.abs()>.001) & (dt<=0)].abs().map(lambda x:cmapg.to_rgba(0 if m==0 else x/m))
         return df.assign(color_gainloss=pd.concat([b_,g_,r_]))
 
     m = dt.max()
-    g_ = dt[(dt<0)].abs().map(lambda x:cmapg.to_rgba(x/m))
+    g_ = dt[(dt<0)].abs().map(lambda x:cmapg.to_rgba(0 if m==0 else x/m))
     r_ = dt[(dt>=0)].abs().map(lambda x:cmapr.to_rgba(0 if m==0 else x/m))
     return df.assign(color_absolut=pd.concat([g_,r_]))
 
