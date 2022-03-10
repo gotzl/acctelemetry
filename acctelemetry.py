@@ -189,7 +189,7 @@ class DataStore(object):
         df['steering_corr'] = df.steerangle/11
         df['oversteer'] = np.sign(df.g_lat) * (df['neutral_steering']-df['steering_corr'])
         df['understeer'] = df['oversteer']
-        df.at[df['understeer'] > 0, 'understeer'] = 0
+        df.loc[df['oversteer'] > 0, ['understeer']] = 0
         return df
 
     @staticmethod
