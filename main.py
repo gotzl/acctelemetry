@@ -2,7 +2,7 @@ import os
 import numpy as np
 
 from bokeh.models.widgets import Button
-from bokeh.models import Panel, Tabs, ColumnDataSource, Selection
+from bokeh.models import Tabs, TabPanel, ColumnDataSource
 from bokeh.plotting import curdoc, figure
 from bokeh.layouts import column, row
 
@@ -68,10 +68,11 @@ def callback():
     figs[1].children[0] = figures.getRPMFigure(df)
     figs[2].children[0] = column([figures.getTyrePreassureFigure(df), figures.getTyreTairFigure(df)], sizing_mode='scale_width')
     figs[3].children[0] = column(figures.getWheelSpeedFigure(df), sizing_mode='scale_width')
-    figs[4].children[0] = column(figures.getSuspFigure(df), sizing_mode='scale_width')
-    figs[5].children[0] = column(figures.getBrakeTempFigure(df), sizing_mode='scale_width')
-    figs[6].children[0] = figures.getOversteerFigure(df)
-    figs[7].children[0] = column(figures.getTrackMapPanel(df), sizing_mode='scale_width')
+    figs[4].children[0] = column(figures.getSuspSpeedHisto(df), sizing_mode='scale_width')
+    figs[5].children[0] = column(figures.getSuspFigure(df), sizing_mode='scale_width')
+    figs[6].children[0] = column(figures.getBrakeTempFigure(df), sizing_mode='scale_width')
+    figs[7].children[0] = figures.getOversteerFigure(df)
+    figs[8].children[0] = column(figures.getTrackMapPanel(df), sizing_mode='scale_width')
 
     button.disabled = False
 
@@ -84,18 +85,18 @@ button = Button(label="Load", button_type="success")
 button.on_click(callback)
 
 tabs,figs = [],[]
-tabs.append(Panel(
+tabs.append(TabPanel(
     child=column(filters, data_table, button, uploadButton(
         source, filter_source, track_select, car_select), sizing_mode='scale_width'),
     title="Laps"))
 
-for ttl in ["LapData", "RPMs", "Tyre Preassure/TempAir", "WheelSpeed", "Suspension", "BrakeTemp", "Over/Understeer", "TrackMap"]:
-    figs.append(row(figure(plot_height=500, plot_width=800), sizing_mode='scale_width', id=ttl.split(" ")[0].lower()))
-    tabs.append(Panel(child=figs[-1], title=ttl, id="%spanel"%ttl.split(" ")[0].lower()))
+for ttl in ["LapData", "RPMs", "Tyre Preassure/TempAir", "WheelSpeed", "SuspensionHist", "Suspension", "BrakeTemp", "Over/Understeer", "TrackMap"]:
+    figs.append(row(figure(height=500, width=800), sizing_mode='scale_width'))
+    tabs.append(TabPanel(child=figs[-1], title=ttl))
 
-tabs.append(Panel(child=figures.getLapDelta(), title="LapsDelta", id='lapsdeltapanel'))
+tabs.append(TabPanel(child=figures.getLapDelta(), title="LapsDelta"))
 
-tabs_ = Tabs(tabs=tabs, id='tabs')
+tabs_ = Tabs(tabs=tabs)
 curdoc().add_root(tabs_)
 
 # filter_source.selected.indices = [0]

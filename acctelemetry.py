@@ -588,7 +588,7 @@ def scanFiles(files):
             if lap==0: continue
             data.append((os.path.basename(f),
                          head.datetime,
-                         head.venue, head.event, i,
+                         head.venue, head.event.name, i,
                          "%i:%02i.%03i"%(lap//60, lap%60, (lap*1e3)%1000),
                          head.driver,
                          ))

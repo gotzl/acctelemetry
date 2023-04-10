@@ -1,5 +1,7 @@
 import os, itertools
 import numpy as np
+from bokeh.plotting._plot import get_range
+from scipy.stats import norm
 from bokeh.io import curdoc
 import matplotlib.colors as mplcolors
 
@@ -7,8 +9,9 @@ from bokeh.palettes import Spectral4, Dark2_5 as palette
 from bokeh.plotting import figure
 from bokeh.models import CrosshairTool, HoverTool, CustomJS, \
     LinearAxis, ColumnDataSource, Range1d, TextInput, Circle, Select, Line, Button, Selection, Slider, TapTool, \
-    LabelSet, Text
+    LabelSet, Text, Legend, LegendItem, BoxAnnotation
 from bokeh.layouts import gridplot, column, row
+
 
 import acctelemetry, laptable
 from ldparser import ldparser
@@ -96,7 +99,7 @@ def getFigure(sources, x='dist_lap', width=800):
     muted_colors = itertools.cycle(Spectral4)
     p,c,h = [],[],[]
     for height, y, tool in zip(heights, ys, tools):
-        p_ = figure(plot_height=height, plot_width=width, tools=TOOLS,
+        p_ = figure(height=height, width=width, tools=TOOLS,
                     title=None, x_axis_label='Dist [m]', y_axis_label='|'.join(y))
 
         # creat crosshair
@@ -161,7 +164,7 @@ def getRPMFigure(df):
     TOOLS = "crosshair,pan,reset,save,wheel_zoom"
 
     # create a new plot with a title and axis labels
-    p1 = figure(plot_height=400, plot_width=WIDTH, tools=TOOLS,
+    p1 = figure(height=400, width=WIDTH, tools=TOOLS,
                 x_axis_label='Velocity [km/h]', y_axis_label='RPMs [1/s]')
 
     # add a line renderer with legend and line thickness
@@ -178,7 +181,7 @@ def getRPMFigure(df):
 
 
     # create a new plot with a title and axis labels
-    p2 = figure(plot_height=400, plot_width=WIDTH, tools=TOOLS,
+    p2 = figure(height=400, width=WIDTH, tools=TOOLS,
                 x_range = p1.x_range, x_axis_label='Velocity [km/h]', y_axis_label='G longi [m/s^2]')
 
     # add a line renderer with legend and line thickness
@@ -196,12 +199,12 @@ def getRPMFigure(df):
     return column(p1,p2, sizing_mode='scale_width')
 
 
-def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None, x_range=None):
+def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None, x_range=get_range(None)):
     WIDTH = 800
     TOOLS = "crosshair,pan,reset,save,wheel_zoom"
 
     # create a new plot with a title and axis labels
-    p = figure(plot_height=400, plot_width=WIDTH, tools=TOOLS,
+    p = figure(height=400, width=WIDTH, tools=TOOLS,
                x_range=x_range, x_axis_label='Dist [m]')
 
     y_range_name = lambda x: None
@@ -246,11 +249,64 @@ def getSimpleFigure(df, vars, tools, extra_y=None, extra_y_vars=None, x_range=No
 
 
 def getSuspFigure(df):
-    vars = ['speedkmh', 'sus_travel_lf', 'sus_travel_lr',
-            'sus_travel_rf', 'sus_travel_rr']
+    vars = ['speedkmh', 'sus_travel_lf', 'sus_travel_rf',
+            'sus_travel_lr', 'sus_travel_rr']
     tools = ['time', 'dist']+vars
     return getSimpleFigure(df, vars, tools,
                            {"sus_travel": Range1d(start=-10, end=120)})
+
+def getSuspSpeedHisto(df):
+    _p = []
+    for i in ['sus_travel_lf', 'sus_travel_rf', 'sus_travel_lr', 'sus_travel_rr']:
+        values = (df[i] - df[i].shift(1))/df['dt']
+        values[0] = 0  # division by 0 ...
+        hist, edges = np.histogram(values, density=True, bins=np.linspace(-100, 100, 40))
+        # hist = hist/sum(hist)
+        # hist *= 100  # make it %
+
+        data = {'count': hist, 'left': edges[:-1], 'right': edges[1:]}
+        data['f_perc'] = ['%d' % count for count in data['count']]
+        data['f_interval'] = ['%d to %d ' % (left, right) for left, right in zip(data['left'], data['right'])]
+
+        # the ideal distribution is a normal distribution
+        sigma = values.std()
+        x = np.linspace(-100, 100, 100)
+        x1 = norm.ppf(0.25, 0, sigma)
+        x2 = norm.ppf(0.75, 0, sigma)
+
+        # # markers for ideal distribution
+        # x1, y1 = [x1, x1], [0, 0.03]
+        # x2, y2 = [x2, x2], [0, 0.03]
+
+        # calculate percentage of values in percentiles
+        _values = sorted(values)
+        _i1 = sum([1 for x in _values if x < x1])/len(values)
+        _i2 = sum([1 for x in _values if (x > x1 and x < 0)])/len(values)
+        _i3 = sum([1 for x in _values[::-1] if (x < x2 and x > 0)])/len(values)
+        _i4 = sum([1 for x in _values[::-1] if x > x2])/len(values)
+
+        p = figure(title=i, x_axis_label='suspension travel [mm/s]', y_axis_label='[%]', background_fill_color="#fafafa")
+        p.quad(bottom=0, top='count', left='left', right='right', source=ColumnDataSource(data),
+               fill_color="navy", line_color="white", alpha=0.5,
+               hover_fill_alpha=0.7, hover_fill_color='blue')
+        p.line(x, norm.pdf(x, 0, sigma), line_color="#ff8888", line_width=4, alpha=0.5, legend_label="ideal")
+        mid_box = BoxAnnotation(left=x2, right=x1, fill_alpha=0.1, fill_color='blue')
+        # right_box = BoxAnnotation(left=x2, fill_alpha=0.1, fill_color='blue')
+
+        hover = HoverTool(tooltips=[(i, '@f_interval'),
+                                    ('Percent', '@f_perc')])
+        legend = Legend(items=[
+            LegendItem(label="average %.3f" % values.mean()),
+            LegendItem(label="precentiles %s" % ', '.join(['%.1f' % v for v in np.percentile(values, [25, 75])])),
+            LegendItem(label="precentiles (ideal) %s" % ', '.join(['%.1f' % v for v in [x1, x2]])),
+        ])
+
+        # p.add_tools(hover)
+        p.add_layout(legend)
+        p.add_layout(mid_box)
+        _p.append(p)
+    return gridplot(_p, ncols=2)
+
 
 def getBrakeTempFigure(df):
     vars = ['brake_temp_lf','brake_temp_lr',
@@ -386,8 +442,8 @@ def getLapDelta():
     mode_select.on_change('value', mode_change)
 
     filter_source.selected.on_change('indices', callback_)
-    tmp = figure(plot_height=500, plot_width=800)
-    layout = column(filters, data_table, mode_select, text_input, tmp, id='lapsdelta', sizing_mode='scale_width')
+    tmp = figure(height=500, width=800)
+    layout = column(filters, data_table, mode_select, text_input, tmp, sizing_mode='scale_width')
     return layout
 
 
@@ -434,7 +490,7 @@ def getLapFigure(p1, df_, ds, mode, ref=False, hasref=False):
     ))
     labels = LabelSet(x='x', y='y', text='text', level='glyph',
                       x_offset=5, y_offset=5,
-                      source=corners_ds, render_mode='canvas')
+                      source=corners_ds)
     p1.add_layout(labels)
 
     # create a invisible renderer for the track map
@@ -558,7 +614,7 @@ def getTrackMap(target, reference=None, mode='speed', view='lapsdelta'):
         df_, df_r = acctelemetry.lapdelta(reference, target)
 
     ds = ColumnDataSource(df_)
-    p0 = figure(plot_height=400, plot_width=800,
+    p0 = figure(height=400, width=800,
                 tools="crosshair,pan,reset,save,wheel_zoom")
 
     colors = itertools.cycle(palette)
@@ -595,7 +651,7 @@ def getTrackMap(target, reference=None, mode='speed', view='lapsdelta'):
     c0.nonselection_glyph = Circle(fill_alpha=0, line_color=None)
 
     # create figure for track map
-    p1 = figure(plot_height=400, plot_width=800, tools="crosshair,pan,reset,save,wheel_zoom")
+    p1 = figure(height=400, width=800, tools="crosshair,pan,reset,save,wheel_zoom")
 
     # create map of the track
     c1 = getLapFigure(p1, df_, ds, mode, hasref=(reference is not None))
